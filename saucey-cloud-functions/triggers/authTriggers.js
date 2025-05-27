@@ -1,4 +1,4 @@
-const functions = require("firebase-functions"); // v1 for auth triggers
+const functions = require("firebase-functions"); // Reverting to v1 for auth triggers
 const admin = require("firebase-admin");
 
 // Admin SDK should be initialized in root index.js, so we can just get db instance

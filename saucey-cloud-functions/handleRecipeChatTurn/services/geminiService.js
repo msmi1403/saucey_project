@@ -29,7 +29,7 @@ const recipeDefaultGenerationConfig = {
 // Ensure the specific models for this service are requested from the shared client.
 // Calling getModel is async and caches; subsequent calls are fast.
 // This helps ensure they are ready or an error is caught early if misconfigured.
-const modelsInitializationPromise = Promise.all([
+const recipeServiceModelsInitPromise = Promise.all([
     geminiClient.getModel(config.GEMINI_MODEL_NAME).catch(e => { console.error(`Failed to init recipe text model ${config.GEMINI_MODEL_NAME}: ${e.message}`); throw e; }),
     geminiClient.getModel(config.GEMINI_VISION_MODEL_NAME).catch(e => { console.error(`Failed to init recipe vision model ${config.GEMINI_VISION_MODEL_NAME}: ${e.message}`); throw e; })
 ]).catch(error => {
@@ -85,7 +85,7 @@ function buildCurrentUserTurnContextualPrompt(userQuery, currentRecipeJsonString
 
 
 async function getRecipeFromTextChat(userQuery, currentRecipeJsonString, userPreferences, chatHistory = [], chefPreambleString = config.CHEF_PERSONALITY_PROMPTS.standard) {
-    await modelsInitializationPromise;
+    await recipeServiceModelsInitPromise;
 
     const currentUserTurnPromptText = buildCurrentUserTurnContextualPrompt(userQuery, currentRecipeJsonString, userPreferences, chefPreambleString);
     const formattedApiHistory = chatHistory.map(msg => ({
@@ -120,7 +120,7 @@ async function getRecipeFromTextChat(userQuery, currentRecipeJsonString, userPre
 }
 
 async function getRecipeFromImage(imageDataBase64, imageMimeType, userQuery, chefPreambleString = config.CHEF_PERSONALITY_PROMPTS.standard) {
-    await modelsInitializationPromise;
+    await recipeServiceModelsInitPromise;
 
     const systemPromptText = config.DETAILED_RECIPE_JSON_SCHEMA_PROMPT.system;
     const standardChefPreamble = config.CHEF_PERSONALITY_PROMPTS.standard || "You are a helpful, expert, and friendly cooking assistant.";
@@ -170,7 +170,7 @@ After you output the JSON, re-print it in a fenced code block and append on a ne
 }
 
 async function getRecipeFromPageText(pageTextContent, userInstructions, sourceUrl, chefPreambleString = config.CHEF_PERSONALITY_PROMPTS.standard) {
-    await modelsInitializationPromise;
+    await recipeServiceModelsInitPromise;
 
     const systemPromptText = config.DETAILED_RECIPE_JSON_SCHEMA_PROMPT.system;
     const standardChefPreamble = config.CHEF_PERSONALITY_PROMPTS.standard || "You are a helpful, expert, and friendly cooking assistant.";
@@ -210,7 +210,7 @@ async function getRecipeFromPageText(pageTextContent, userInstructions, sourceUr
 }
 
 async function getRecipeTitlesOnly(userQuery, chefPreambleString = config.CHEF_PERSONALITY_PROMPTS.standard) {
-    await modelsInitializationPromise;
+    await recipeServiceModelsInitPromise;
     const standardChefPreamble = config.CHEF_PERSONALITY_PROMPTS.standard || "You are a helpful, expert, and friendly cooking assistant.";
     let personalityInstruction = "";
     if (chefPreambleString && chefPreambleString.trim() !== "" && chefPreambleString !== standardChefPreamble) {
@@ -252,7 +252,7 @@ async function getRecipeTitlesOnly(userQuery, chefPreambleString = config.CHEF_P
 }
 
 async function correctRecipeJson(originalUserQuery, erroneousJsonString, ajvErrors, preferredChefPersonalityKey, chatHistory = []) {
-    await modelsInitializationPromise;
+    await recipeServiceModelsInitPromise;
     const chefPreambleString = config.CHEF_PERSONALITY_PROMPTS[preferredChefPersonalityKey] || config.CHEF_PERSONALITY_PROMPTS.standard;
     const systemPromptText = config.DETAILED_RECIPE_JSON_SCHEMA_PROMPT.system;
 

@@ -214,12 +214,13 @@ exports.summarizeAndReportFeedbackV2 = onSchedule(
         from: `"Saucey App Feedback" <${gmailEmail}>`,
         to: recipientEmail,
         subject: subject,
-        text: `Feedback Summary for Saucey App (Project ID: ${projectID} - Period: Last ${periodDays} Days):\n\n${llmSummary}`,
+        text: `There were ${feedbackItems.length} new feedback submission(s) during the past ${periodDays} days.\n\nFeedback Summary for Saucey App (Project ID: ${projectID} - Period: Last ${periodDays} Days):\n\n${llmSummary}`,
         html: `
           <div style="font-family: Arial, sans-serif; line-height: 1.6;">
             <h1>Feedback Summary - Saucey App</h1>
             <p><strong>Project ID:</strong> ${projectID}</p>
             <p><strong>Report for ${periodDays}-day period ending:</strong> ${reportDate}</p>
+            <p><strong>There were ${feedbackItems.length} new feedback submission(s) during this ${periodDays}-day period.</strong></p>
             <hr>
             <h2 style="color: #333;">AI Generated Summary:</h2>
             <pre style="white-space: pre-wrap; font-family: Consolas, 'Courier New', monospace; font-size: 14px; background-color: #f9f9f9; padding: 15px; border-radius: 5px; border: 1px solid #eee;">${llmSummary}</pre>
