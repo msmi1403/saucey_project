@@ -1,5 +1,7 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin"); // For admin.firestore.Timestamp
+const functions = require("firebase-functions"); // Added for logger
+const { logger } = functions; // Added for logger
 
 // Assuming admin is initialized (e.g., in root index.js)
 const db = admin.firestore();
@@ -23,20 +25,18 @@ const DEFAULT_ITEMS_PER_CATEGORY = 7;
  */
 const getDiscoveryFeed = onCall(async (request) => {
     const callerUid = request.auth ? request.auth.uid : null;
-    // pageContext could be used for different feed variations if needed later
     const pageContext = request.data.pageContext || "mainDiscovery"; 
+    const logPrefix = "getDiscoveryFeed:"; // Standardized prefix
 
-    // This check was in the original, good to keep if this specific context is handled elsewhere.
     if (pageContext === "creatorProfileView") {
-        console.warn(
-            "getDiscoveryFeed: Received 'creatorProfileView' context. " +
+        logger.warn(
+            `${logPrefix} Received 'creatorProfileView' context for pageContext: ${pageContext}, caller: ${callerUid || 'Guest'}. ` + // Changed to logger
             "This should be handled by 'getCreatorProfileData'. Returning empty."
         );
         return { feedTitle: "Discovery", categories: [] };
     }
 
-    const logPrefix = `getDiscoveryFeed[Context:${pageContext}, Caller:${callerUid || 'Guest'}]:`;
-    console.log(`${logPrefix} Function started.`);
+    logger.info(`${logPrefix} Function started. Context: ${pageContext}, Caller: ${callerUid || 'Guest'}.`); // Changed to logger
 
     const feedResponse = {
         feedTitle: "Saucey Discovery", // Or make this dynamic based on context
@@ -60,7 +60,7 @@ const getDiscoveryFeed = onCall(async (request) => {
         });
 
         if (categoryDefinitionSource.length === 0) {
-            console.log(`${logPrefix} No category definitions found in 'leaderboard_definitions'.`);
+            logger.info(`${logPrefix} No category definitions found in 'leaderboard_definitions'. Context: ${pageContext}`); // Changed to logger
             return feedResponse; // Return empty feed if no definitions
         }
 
@@ -69,7 +69,7 @@ const getDiscoveryFeed = onCall(async (request) => {
             let query;
             const fetchLimit = def.limit || DEFAULT_ITEMS_PER_CATEGORY;
             const defTypeLog = `Def: "${def.title}" (Type: ${def.type}, Limit: ${fetchLimit})`;
-            console.log(`${logPrefix} Processing ${defTypeLog}`);
+            logger.info(`${logPrefix} Processing ${defTypeLog}. Context: ${pageContext}`); // Changed to logger
 
             switch (def.type) {
                 case "overall": // Example: Most popular overall
@@ -90,7 +90,7 @@ const getDiscoveryFeed = onCall(async (request) => {
                             .orderBy("createdAt", "desc")
                             .limit(fetchLimit);
                     } else {
-                        console.warn(`${logPrefix} tagBased category "${def.title}" is missing valid 'filterTags'.`);
+                        logger.warn(`${logPrefix} tagBased category "${def.title}" is missing valid 'filterTags'. Context: ${pageContext}`); // Changed to logger
                     }
                     break;
                 case "timeBased": // Example: New recipes from last X days
@@ -107,7 +107,7 @@ const getDiscoveryFeed = onCall(async (request) => {
                         .limit(fetchLimit);
                     break;
                 default:
-                    console.warn(`${logPrefix} Unknown category definition type: "${def.type}" for "${def.title}". Skipping.`);
+                    logger.warn(`${logPrefix} Unknown category definition type: "${def.type}" for "${def.title}". Skipping. Context: ${pageContext}`); // Changed to logger
                     break;
             }
 
@@ -128,16 +128,16 @@ const getDiscoveryFeed = onCall(async (request) => {
                     canLoadMore: recipes.length === fetchLimit, // Simple pagination hint
                 });
             } else {
-                console.log(`${logPrefix} No recipes found for category "${def.title}".`);
+                logger.info(`${logPrefix} No recipes found for category "${def.title}". Context: ${pageContext}`); // Changed to logger
             }
         }
 
         const catCount = feedResponse.categories.length;
-        console.log(`${logPrefix} Prepared feed with ${catCount} categories.`);
+        logger.info(`${logPrefix} Prepared feed with ${catCount} categories. Context: ${pageContext}`); // Changed to logger
         return feedResponse;
 
     } catch (error) {
-        console.error(`${logPrefix} Error processing discovery feed:`, error);
+        logger.error(`${logPrefix} Error processing discovery feed. Context: ${pageContext}:`, error); // Changed to logger
         throw new HttpsError("internal", "Failed to get discovery feed.", error.message);
     }
 });
@@ -147,31 +147,31 @@ const getDiscoveryFeed = onCall(async (request) => {
  * Requires authentication.
  */
 const searchPublicRecipesWithTypesense = onCall(async (request) => {
+    const logPrefix = "searchPublicRecipesWithTypesense:"; // Standardized prefix
     await typesenseInitializationPromise; // Ensure Typesense is initialized
     const typesenseSearchClient = getTypesenseSearchClient();
 
     if (!typesenseSearchClient) {
-        console.error("searchPublicRecipesWithTypesense: Typesense search client not available.");
+        logger.error(`${logPrefix} Typesense search client not available.`); // Changed to logger
         throw new HttpsError("unavailable", "Search service is currently unavailable. Please try again later.");
     }
 
     if (!request.auth) {
-        console.error("searchPublicRecipesWithTypesense: Authentication required.");
+        logger.error(`${logPrefix} Authentication required.`); // Changed to logger
         throw new HttpsError("unauthenticated", "The function must be called while authenticated.");
     }
-    // const callerUid = request.auth.uid; // Available if needed for logging or rules
+    const callerUid = request.auth.uid;
 
     const query = request.data.query;
     if (!query || typeof query !== "string" || query.trim().length === 0) {
-        console.error("searchPublicRecipesWithTypesense: Search query is missing or invalid.", { query });
+        logger.error(`${logPrefix} Search query is missing or invalid.`, { query, callerUid }); // Changed to logger
         throw new HttpsError("invalid-argument", "A non-empty 'query' string must be provided.");
     }
     
     const perPage = request.data.perPage || 30; // Allow client to specify, default to 30
     const page = request.data.page || 1; // Allow client to specify, default to 1
 
-    const logPrefix = `searchPublicRecipesWithTypesense[Query:"${query}", Page:${page}, PerPage:${perPage}]:`;
-    console.log(`${logPrefix} Processing search by user ${request.auth.uid}.`);
+    logger.info(`${logPrefix} Processing search. Query:"${query}", Page:${page}, PerPage:${perPage}, User:${callerUid}.`); // Changed to logger
 
     const searchParameters = {
         "q": query,
@@ -189,51 +189,33 @@ const searchPublicRecipesWithTypesense = onCall(async (request) => {
             .documents()
             .search(searchParameters);
 
-        console.log(`${logPrefix} Found ${searchResults.found} total hits. Returning page ${searchResults.page} of ${searchResults.out_of} results.`);
+        logger.info(`${logPrefix} Typesense search successful. Query:"${query}", Found:${searchResults.found}, Page:${searchResults.page}/${searchResults.out_of}, User:${callerUid}.`); // Changed to logger
 
         // Format results to match client expectations (RecipeSummary-like from formatRecipeSummary)
         const formattedHits = searchResults.hits.map((hit) => {
-            const doc = hit.document;
-            // We can reuse formatRecipeSummary here if the Typesense document structure is compatible
-            // or create a dedicated formatter if fields differ significantly.
-            // For now, assuming direct mapping and some defaults for fields not in Typesense doc.
-            return {
-                // recipeId is typically the 'id' field in Typesense documents
-                recipeId: doc.id, 
-                title: doc.title || null,
-                imageURL: doc.imageURL || null,
-                createdByUsername: doc.createdByUsername || null,
-                // createdByUserId: doc.createdByUserId || null, // If you index this
-                saveCount: doc.saveCount || 0,
-                total_time: doc.total_time || null,
-                averageRating: doc.averageRating || null,
-                reviewCount: doc.reviewCount || 0,
-                // These fields might not be in Typesense, ensure client handles nulls gracefully
-                // or fetch full recipe data if detailed info is needed for search results.
-                // For search, usually a summary is enough.
-                // cuisine: doc.cuisine || null, // Already in query_by, so should be in doc
-                // tags: doc.tags || [],     // Already in query_by, so should be in doc
-                // isPublic: typeof doc.isPublic === 'boolean' ? doc.isPublic : false,
-                // difficulty: doc.difficulty || null,
-                // category: doc.category || null,
-            };
-        });
+            const doc = hit.document; // This is the document from Typesense
+            // The id field in Typesense is the Firestore document ID.
+            // Use formatRecipeSummary, assuming Typesense doc has compatible fields.
+            // If Typesense doc structure is very different, a specific formatter might be needed.
+            return formatRecipeSummary(doc, doc.id || doc.recipeId); // Pass doc and its ID
+        }).filter(Boolean); // Filter out any nulls if formatRecipeSummary returns null for bad data
 
         return {
+            query: query,
             results: formattedHits,
-            totalResults: searchResults.found,
-            totalPages: Math.ceil(searchResults.found / searchParameters.per_page),
+            totalHits: searchResults.found,
             currentPage: searchResults.page,
+            totalPages: Math.ceil(searchResults.found / searchParameters.per_page),
+            hitsPerPage: searchParameters.per_page,
         };
 
     } catch (error) {
-        console.error(`${logPrefix} Error during Typesense search:`, error);
-        // Check if it's a Typesense API error to provide more specific feedback
-        if (error.httpStatus) {
-            console.error(`${logPrefix} Typesense API Error: Status ${error.httpStatus}, Message: ${error.message}`);
-            throw new HttpsError("unavailable", "Search service experienced an issue. Please try again.", error.message);
+        logger.error(`${logPrefix} Error searching with Typesense. Query:"${query}", User:${callerUid}:`, error); // Changed to logger
+        if (error.httpStatus) { // Handle Typesense specific errors
+            throw new HttpsError("unavailable", `Search operation failed: ${error.message}`, { query });
+        } else {
+            throw new HttpsError("internal", "An unexpected error occurred during search.", { query });
         }
-        throw new HttpsError("internal", "Failed to perform search due to an unexpected error.", error.message);
     }
 });
 

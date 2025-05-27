@@ -1,5 +1,7 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
+const functions = require("firebase-functions"); // Added for logger
+const { logger } = functions; // Added for logger
 // Assuming admin is initialized in a shared file, e.g., ../shared/firebaseAdmin.js
 // If not, you might need:
 // admin.initializeApp(); 
@@ -27,13 +29,15 @@ const db = admin.firestore();
 
 
 /**
- * Unpublishes a public recipe by setting its isPublic flag to false.
+ * Unpublishes a public recipe by setting its isPublic flag to false and updating lastUpdated.
  * Requires authentication and ownership of the recipe.
  */
 const unpublishPublicRecipe = onCall(async (request) => {
+  const logPrefix = "unpublishPublicRecipe:"; // Added for logger
+
   // 1. Check authentication using request.auth
   if (!request.auth) {
-    console.error("unpublishPublicRecipe: Authentication required.");
+    logger.error(`${logPrefix} Authentication required.`); // Changed to logger
     throw new HttpsError(
       "unauthenticated",
       "The function must be called while authenticated."
@@ -45,12 +49,13 @@ const unpublishPublicRecipe = onCall(async (request) => {
 
   // 2. Validate input
   if (!recipeId || typeof recipeId !== "string" || recipeId.length === 0) {
-    console.error("unpublishPublicRecipe: Invalid recipeId provided.", { recipeId });
+    logger.error(`${logPrefix} Invalid recipeId provided.`, { recipeId }); // Changed to logger
     throw new HttpsError(
       "invalid-argument",
       "The function must be called with a valid 'recipeId' string."
     );
   }
+  logger.info(`${logPrefix} User ${userId} attempting to unpublish recipe ${recipeId}.`); // Added for logger
 
   const publicRecipeRef = db.collection("public_recipes").doc(recipeId);
 
@@ -59,8 +64,8 @@ const unpublishPublicRecipe = onCall(async (request) => {
 
     // 3. Check if the public recipe document exists
     if (!publicRecipeDoc.exists) {
-      console.log(
-        `unpublishPublicRecipe: Recipe ${recipeId} not found in public_recipes. No action needed.`
+      logger.info(
+        `${logPrefix} Recipe ${recipeId} not found in public_recipes. No action needed.` // Changed to logger
       );
       return {
         success: true,
@@ -72,8 +77,8 @@ const unpublishPublicRecipe = onCall(async (request) => {
 
     // 4. Verify ownership (Security Check)
     if (!recipeData.createdByUserId) {
-      console.error(
-        `unpublishPublicRecipe: Missing createdByUserId field on public recipe ${recipeId}. Cannot verify owner.`
+      logger.error(
+        `${logPrefix} Missing createdByUserId field on public recipe ${recipeId}. Cannot verify owner.` // Changed to logger
       );
       throw new HttpsError(
         "failed-precondition",
@@ -82,8 +87,8 @@ const unpublishPublicRecipe = onCall(async (request) => {
     }
 
     if (recipeData.createdByUserId !== userId) {
-      console.error(
-        `unpublishPublicRecipe: User ${userId} attempted to unpublish recipe ${recipeId} owned by ${recipeData.createdByUserId}.`
+      logger.error(
+        `${logPrefix} User ${userId} attempted to unpublish recipe ${recipeId} owned by ${recipeData.createdByUserId}.` // Changed to logger
       );
       throw new HttpsError(
         "permission-denied",
@@ -91,15 +96,19 @@ const unpublishPublicRecipe = onCall(async (request) => {
       );
     }
 
-    // 5. Perform the unpublish action (Set isPublic to false)
-    await publicRecipeRef.update({ isPublic: false });
-    console.log(
-      `unpublishPublicRecipe: Successfully set isPublic=false for recipe ${recipeId} in public_recipes by owner ${userId}.`
+    // 5. Perform the unpublish action (Set isPublic to false and update lastUpdated)
+    const updateData = {
+      isPublic: false,
+      lastUpdated: admin.firestore.FieldValue.serverTimestamp(), // Added lastUpdated
+    };
+    await publicRecipeRef.update(updateData);
+    logger.info(
+      `${logPrefix} Successfully set isPublic=false and updated lastUpdated for recipe ${recipeId} in public_recipes by owner ${userId}.` // Changed to logger
     );
-    return { success: true, message: "Recipe marked as not public." };
+    return { success: true, message: "Recipe unpublished and marked as not public." }; // Updated message
   } catch (error) {
-    console.error(
-      `unpublishPublicRecipe: Error unpublishing recipe ${recipeId} from public_recipes:`,
+    logger.error(
+      `${logPrefix} Error unpublishing recipe ${recipeId} from public_recipes:`, // Changed to logger
       error
     );
     if (error instanceof HttpsError) {
@@ -108,7 +117,7 @@ const unpublishPublicRecipe = onCall(async (request) => {
     throw new HttpsError(
       "internal",
       "An error occurred while unpublishing the recipe.",
-      error.message // Include original error message for better debugging
+      error.message
     );
   }
 });

@@ -318,7 +318,7 @@ async function generateTextualInsight(promptTemplateName, userContext, dynamicSt
             safetySettings: defaultSafetySettings
         });
         const generatedText = response.text();
-        logger.log(`Generated textual insight for '${promptTemplateName}': "${generatedText}"`);
+        logger.log(`Generated textual insight for '${promptTemplateName}': "${generatedText ? generatedText.substring(0, 150) + (generatedText.length > 150 ? "..." : "") : "null"}"`);
         return generatedText;
     } catch (error) {
         logger.error(`Error generating textual insight with prompt '${promptTemplateName}' for ${notificationType}:`, error);

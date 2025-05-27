@@ -1,5 +1,7 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
+const functions = require("firebase-functions"); // Added for logger
+const { logger } = functions; // Added for logger
 
 // Assuming admin is initialized (e.g., in root index.js)
 const db = admin.firestore();
@@ -15,13 +17,14 @@ const CREATOR_PROFILE_ALL_PUBLIC_LIMIT = 20;
  * Calculates the average rating of all public recipes created by the authenticated user.
  */
 const getUserAveragePublicRating = onCall(async (request) => {
+    const logPrefix = "getUserAveragePublicRating:"; // Standardized prefix
+
     if (!request.auth) {
-        console.error("getUserAveragePublicRating: Authentication required.");
+        logger.error(`${logPrefix} Authentication required.`); // Changed to logger
         throw new HttpsError("unauthenticated", "The function must be called while authenticated.");
     }
     const userId = request.auth.uid; // Recipes CREATED BY this user
-    const logPrefix = `getUserAveragePublicRating[User:${userId}]:`;
-    console.log(`${logPrefix} Function started.`);
+    logger.info(`${logPrefix} Function started for user ${userId}.`); // Changed to logger and added userId
 
     let totalAverageRatingSum = 0;
     let publicRecipeCountWithRating = 0;
@@ -35,7 +38,7 @@ const getUserAveragePublicRating = onCall(async (request) => {
         const publicRecipesSnapshot = await userPublicRecipesQuery.get();
 
         if (publicRecipesSnapshot.empty) {
-            console.log(`${logPrefix} User has no public recipes.`);
+            logger.info(`${logPrefix} User ${userId} has no public recipes.`); // Changed to logger and added userId
             return { averageRating: null, ratedRecipeCount: 0 }; 
         }
 
@@ -56,10 +59,10 @@ const getUserAveragePublicRating = onCall(async (request) => {
             ratedRecipeCount: publicRecipeCountWithRating,
         };
 
-        console.log(`${logPrefix} Calculation complete. Result:`, result);
+        logger.info(`${logPrefix} Calculation complete for user ${userId}. Result:`, result); // Changed to logger and added userId
         return result;
     } catch (error) {
-        console.error(`${logPrefix} Error during calculation:`, error);
+        logger.error(`${logPrefix} Error during calculation for user ${userId}:`, error); // Changed to logger and added userId
         throw new HttpsError("internal", "Failed to calc user's avg rating.", error.message);
     }
 });
@@ -72,14 +75,14 @@ const getUserAveragePublicRating = onCall(async (request) => {
 const getCreatorProfileData = onCall(async (request) => {
     const profileOwnerId = request.data.profileOwnerId;
     const callerUid = request.auth ? request.auth.uid : null; // Can be called unauthenticated
+    const logPrefix = "getCreatorProfileData:"; // Standardized prefix
 
     if (!profileOwnerId || typeof profileOwnerId !== "string") {
-        console.error("getCreatorProfileData: Missing or invalid 'profileOwnerId'.", { profileOwnerId });
+        logger.error(`${logPrefix} Missing or invalid 'profileOwnerId'.`, { profileOwnerId }); // Changed to logger
         throw new HttpsError("invalid-argument", "Valid 'profileOwnerId' is required.");
     }
 
-    const logPrefix = `getCreatorProfileData[Owner:${profileOwnerId}, Caller:${callerUid || 'Anon'}]:`;
-    console.log(`${logPrefix} Function started.`);
+    logger.info(`${logPrefix} Function started for profileOwnerId: ${profileOwnerId}, called by: ${callerUid || 'Anon'}.`); // Changed to logger
 
     try {
         // --- 1. Fetch User Profile Info ---
@@ -93,7 +96,7 @@ const getCreatorProfileData = onCall(async (request) => {
             userProfileData.username = userProfileData.username || "User"; // Default username if missing
             // Add any other transformations or default values needed by the client
         } else {
-            console.log(`${logPrefix} User profile not found for ${profileOwnerId}.`);
+            logger.info(`${logPrefix} User profile not found for ${profileOwnerId}.`); // Changed to logger
         }
 
         // --- 2. Fetch Public Recipes by this Creator ---
@@ -139,11 +142,11 @@ const getCreatorProfileData = onCall(async (request) => {
             recipeCategories: recipeCategories,
         };
 
-        console.log(`${logPrefix} Successfully fetched data. Profile found: ${!!userProfileData}, Categories: ${recipeCategories.length}`);
+        logger.info(`${logPrefix} Successfully fetched data for ${profileOwnerId}. Profile found: ${!!userProfileData}, Categories: ${recipeCategories.length}`); // Changed to logger
         return response;
 
     } catch (error) {
-        console.error(`${logPrefix} Error:`, error);
+        logger.error(`${logPrefix} Error for ${profileOwnerId}:`, error); // Changed to logger
         const errorMessage = error.message || "An unknown error occurred while fetching creator profile.";
         throw new HttpsError("internal", errorMessage, error.details); // Pass details if available
     }
@@ -161,17 +164,17 @@ const getUserTotalSaves = onCall(async (request) => {
     // }
 
     const profileOwnerId = request.data.userId; // Expecting 'userId' from the client
+    const logPrefix = "getUserTotalSaves:"; // Standardized prefix
 
     if (!profileOwnerId || typeof profileOwnerId !== "string" || profileOwnerId.length === 0) {
-        console.error("getUserTotalSaves: Missing or invalid 'userId' in request data.", { profileOwnerId });
+        logger.error(`${logPrefix} Missing or invalid 'userId' in request data.`, { profileOwnerId }); // Changed to logger
         throw new HttpsError(
             "invalid-argument",
             "The function must be called with a valid 'userId' string in the data payload."
         );
     }
 
-    const logPrefix = `getUserTotalSaves[ProfileOwner:${profileOwnerId}]:`;
-    console.log(`${logPrefix} Function started.`);
+    logger.info(`${logPrefix} Function started for profileOwnerId: ${profileOwnerId}.`); // Changed to logger
 
     let totalSaves = 0;
 
@@ -184,7 +187,7 @@ const getUserTotalSaves = onCall(async (request) => {
         const publicRecipesSnapshot = await userPublicRecipesQuery.get();
 
         if (publicRecipesSnapshot.empty) {
-            console.log(`${logPrefix} User has no public recipes. Total saves is 0.`);
+            logger.info(`${logPrefix} User ${profileOwnerId} has no public recipes. Total saves is 0.`); // Changed to logger
             return { totalSaves: 0 };
         }
 
@@ -195,16 +198,12 @@ const getUserTotalSaves = onCall(async (request) => {
             }
         });
 
-        console.log(`${logPrefix} Calculation complete. Total saves: ${totalSaves}`);
+        logger.info(`${logPrefix} Calculation complete for ${profileOwnerId}. Total saves: ${totalSaves}`); // Changed to logger
         return { totalSaves: totalSaves }; // Ensure this matches client expectation
 
     } catch (error) {
-        console.error(`${logPrefix} Error during calculation:`, error);
-        throw new HttpsError(
-            "internal",
-            "Failed to calculate user's total recipe saves.",
-            error.message
-        );
+        logger.error(`${logPrefix} Error during calculation for ${profileOwnerId}:`, error); // Changed to logger
+        throw new HttpsError("internal", "Failed to calculate total saves.", error.message);
     }
 });
 

@@ -1,7 +1,7 @@
 const admin = require("firebase-admin");
 const { onRequest } = require("firebase-functions/v2/https");
 const cors = require("cors")({ origin: true }); // Configure CORS as needed
-const functions = require("firebase-functions"); // For logger
+const functions = require("firebase-functions");
 const { logger } = functions;
 
 // Admin SDK initialized in root index.js
@@ -9,7 +9,7 @@ const db = admin.firestore();
 
 /**
  * HTTP Requestable Function: getRecipeById
- * Fetches a recipe document from Firestore by its ID.
+ * Fetches a public recipe document from Firestore by its ID.
  * Expects a 'recipeId' query parameter.
  */
 const getRecipeById = onRequest(async (req, res) => {
@@ -29,39 +29,41 @@ const getRecipeById = onRequest(async (req, res) => {
     logger.info(`${logPrefix} Received request for recipeId: ${recipeId}`);
 
     try {
-      // The original function fetched from a top-level 'recipes' collection.
-      // Adjust if your public, shareable recipes are in 'public_recipes' or another collection.
-      // For now, assuming 'recipes' is the correct collection for recipes fetchable by ID this way.
-      const recipeRef = db.collection("recipes").doc(recipeId);
+      const recipeRef = db.collection("public_recipes").doc(recipeId);
       const docSnap = await recipeRef.get();
 
       if (!docSnap.exists) {
-        logger.warn(`${logPrefix} Recipe document with ID ${recipeId} not found.`);
-        return res.status(404).send(`Not Found: Recipe with ID ${recipeId} not found.`);
+        logger.warn(`${logPrefix} Public recipe document with ID ${recipeId} not found.`);
+        return res.status(404).send(`Not Found: Public recipe with ID ${recipeId} not found.`);
       }
 
       const recipeData = docSnap.data();
+      // Ensure we only return data appropriate for a public, non-editable recipe view.
+      // This should align with what formatRecipeSummary or similar utilities provide for public listings.
       const responseData = {
         recipeId: docSnap.id,
         title: recipeData.title || "No Title",
+        imageURL: recipeData.imageURL || null,
         total_time: recipeData.total_time || null,
         servings: recipeData.servings || null,
-        ingredients: Array.isArray(recipeData.ingredients) ? recipeData.ingredients : [],
-        instructions: Array.isArray(recipeData.instructions) ? recipeData.instructions : [],
-        // Add other fields as expected by clients calling this specific endpoint
-        // For example, if this is for full recipe details:
-        // cuisine: recipeData.cuisine || null,
-        // difficulty: recipeData.difficulty || null,
-        // createdByUserId: recipeData.createdByUserId || null,
-        // createdByUsername: recipeData.createdByUsername || null,
-        // imageURL: recipeData.imageURL || null,
-        // etc.
+        // Depending on client needs, you might include more fields like cuisine, averageRating, etc.
+        // For now, keeping it concise. If full details are needed, expand this.
+        // ingredients: Array.isArray(recipeData.ingredients) ? recipeData.ingredients : [],
+        // instructions: Array.isArray(recipeData.instructions) ? recipeData.instructions : [],
+        // createdByUsername: recipeData.createdByUsername || null, 
+        // averageRating: recipeData.averageRating || 0,
+        // saveCount: recipeData.saveCount || 0,
       };
+      
+      // If detailed recipe data is expected (like ingredients/instructions), add them.
+      // Example: if (recipeData.ingredients) responseData.ingredients = recipeData.ingredients;
+      // Example: if (recipeData.instructions) responseData.instructions = recipeData.instructions;
 
-      logger.info(`${logPrefix} Successfully fetched recipe ${recipeId}.`);
+
+      logger.info(`${logPrefix} Successfully fetched public recipe ${recipeId}.`);
       return res.status(200).json(responseData);
     } catch (error) {
-      logger.error(`${logPrefix} Error fetching recipe ${recipeId}:`, error);
+      logger.error(`${logPrefix} Error fetching public recipe ${recipeId}:`, error);
       return res.status(500).send("Internal Server Error");
     }
   });
