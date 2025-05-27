@@ -9,7 +9,7 @@ const {
     generateTextualInsight,
     generateRecapNotificationInternal
 } = require("../aiLogic/notificationGenerator");
-const { sendTargetedNotification } = require("../services/notificationSender");
+const { dispatchNotification } = require("../services/sendNotification");
 const { notificationConfigs } = require("../config/notificationConfig");
 
 const WEEKLY_RECIPE_SUGGESTION = "weeklyRecipeSuggestion";
@@ -115,10 +115,10 @@ exports.sendWeeklyRecipeSuggestions = onSchedule({ schedule: "every monday 10:50
         const usersSnapshot = await firestoreHelper.getCollection("users", { /* Add filters for active users if desired */ });
 
         for (const userDoc of usersSnapshot) {
-            if (!userDoc.id || !userDoc.fcmTokens || userDoc.fcmTokens.length === 0) {
-                logger.info(`Skipping user ${userDoc.id || 'unknown'} due to missing ID or FCM tokens.`);
-                continue;
-            }
+            // Initial checks for userDoc.id and fcmTokens are handled by dispatchNotification, 
+            // but an early exit here can save some processing if fcmTokens are known to be empty.
+            // However, dispatchNotification also checks preferences, which might be relevant even if tokens are temporarily empty.
+            // For now, let dispatchNotification handle the primary checks for user validity and preferences.
             logger.log(`Processing user ${userDoc.id} for ${WEEKLY_RECIPE_SUGGESTION}`);
 
             const userContext = await analyzeUserActivityAndPrefs(userDoc.id, userDoc);
@@ -135,18 +135,17 @@ exports.sendWeeklyRecipeSuggestions = onSchedule({ schedule: "every monday 10:50
                 });
                 if (Array.isArray(cookLogSnapshot)) {
                     recentlyCookedIds = cookLogSnapshot.map(logEntry => logEntry.recipeId).filter(id => !!id);
-                    logger.info(`User ${userDoc.id}: Fetched ${recentlyCookedIds.length} recently cooked recipe IDs from 'cook_log'.`);
                 } else {
-                    logger.warn(`Cook log snapshot ('cook_log') was not an array for user ${userDoc.id}. Snapshot received:`, cookLogSnapshot);
+                    logger.warn(`Cook log snapshot ('cook_log') was not an array for user ${userDoc.id}.`);
                 }
             } catch (historyError) {
                 logger.warn(`Error fetching 'cook_log' for user ${userDoc.id}:`, historyError);
             }
 
-            let suggestionStrategy = "existingRecipe"; // Default strategy
-            let recipeDynamicData = {};
-            let finalDeepLink = config.defaultDeepLinkBase || "saucey://home";
-            let performAISuggestion = false; // Flag to indicate if we should proceed to AI content gen and sending
+            let suggestionStrategy = "existingRecipe";
+            let recipeDynamicData = {}; 
+            let calculatedDeepLink = config.defaultDeepLinkBase || "saucey://home"; // Start with a base default
+            let performAISuggestionAndDispatch = false; 
 
             // Initial Strategy Selection (Random)
             const rand = Math.random();
@@ -160,7 +159,7 @@ exports.sendWeeklyRecipeSuggestions = onSchedule({ schedule: "every monday 10:50
                     suggestionStrategy = "recipeRemix";
                     recipeDynamicData.existingRecipeForRemix = personalRecipes[Math.floor(Math.random() * personalRecipes.length)];
                 } else {
-                    suggestionStrategy = "surpriseMeRecipeConcept";
+                    suggestionStrategy = "surpriseMeRecipeConcept"; // Fallback if no personal recipes for remix
                 }
             }
             logger.log(`User ${userDoc.id}: Initial selected strategy: ${suggestionStrategy}`);
@@ -171,29 +170,26 @@ exports.sendWeeklyRecipeSuggestions = onSchedule({ schedule: "every monday 10:50
                 if (existingRecipe?.id && existingRecipe.name) {
                     recipeDynamicData.recipeId = existingRecipe.id;
                     recipeDynamicData.recipeName = existingRecipe.name;
-                    finalDeepLink = (config.defaultDeepLinkBase || "saucey://recipe/").endsWith('/') ?
-                        `${config.defaultDeepLinkBase}${existingRecipe.id}` :
-                        `${config.defaultDeepLinkBase}/${existingRecipe.id}`;
-                    performAISuggestion = true;
+                    calculatedDeepLink = (config.defaultDeepLinkBase || "saucey://recipe/").endsWith('/') ?
+                                        `${config.defaultDeepLinkBase}${existingRecipe.id}` :
+                                        `${config.defaultDeepLinkBase}/${existingRecipe.id}`;
+                    performAISuggestionAndDispatch = true;
                 } else {
                     logger.warn(`No existing recipe found for user ${userDoc.id} with 'existingRecipe' strategy. FALLING BACK to 'recipeIdea'.`);
-                    suggestionStrategy = "recipeIdea"; // <<<< FALLBACK LOGIC
+                    suggestionStrategy = "recipeIdea"; 
                 }
             }
 
-            // Handle 'recipeIdea', 'surpriseMeRecipeConcept', or fallback from 'existingRecipe'
             if (suggestionStrategy === "recipeIdea" || suggestionStrategy === "surpriseMeRecipeConcept") {
                 const ideaConcept = await generateRecipeConcept(WEEKLY_RECIPE_SUGGESTION, userContext, suggestionStrategy === "recipeIdea" ? 'idea' : 'surprise');
                 if (ideaConcept) {
                     recipeDynamicData.recipeIdea = ideaConcept;
-                    finalDeepLink = `${config.chatDeepLinkBase || "saucey://aichat?prompt="}${encodeURIComponent(ideaConcept)}`;
-                    performAISuggestion = true;
+                    calculatedDeepLink = `${config.chatDeepLinkBase || "saucey://aichat?prompt="}${encodeURIComponent(ideaConcept)}`;
+                    performAISuggestionAndDispatch = true;
                 } else {
-                    logger.warn(`Failed to generate recipe idea/surprise for user ${userDoc.id} (strategy: ${suggestionStrategy}). Skipping notification for this user.`);
-                    // No more fallbacks here, so we will skip.
+                    logger.warn(`Failed to generate recipe idea/surprise for user ${userDoc.id} (strategy: ${suggestionStrategy}). Skipping.`);
                 }
             }
-            // Handle 'recipeRemix'
             else if (suggestionStrategy === "recipeRemix") {
                 if (recipeDynamicData.existingRecipeForRemix?.name) {
                     const remixConcept = await generateRecipeConcept(
@@ -206,60 +202,65 @@ exports.sendWeeklyRecipeSuggestions = onSchedule({ schedule: "every monday 10:50
                         recipeDynamicData.remixIdea = remixConcept;
                         recipeDynamicData.originalRecipeNameForRemixDisplay = recipeDynamicData.existingRecipeForRemix.name;
                         const promptForChat = `Remix idea for "${recipeDynamicData.existingRecipeForRemix.name}": ${remixConcept}`;
-                        finalDeepLink = `${config.chatDeepLinkBase || "saucey://aichat?prompt="}${encodeURIComponent(promptForChat)}`;
-                        performAISuggestion = true;
+                        calculatedDeepLink = `${config.chatDeepLinkBase || "saucey://aichat?prompt="}${encodeURIComponent(promptForChat)}`;
+                        performAISuggestionAndDispatch = true;
                     } else {
                         logger.warn(`Failed to generate remix concept for user ${userDoc.id}. FALLING BACK to 'recipeIdea'.`);
-                        suggestionStrategy = "recipeIdea"; // Fallback from a failed remix
-                        // Now attempt 'recipeIdea' immediately within this loop iteration
+                        suggestionStrategy = "recipeIdea"; 
                         const ideaConceptFallback = await generateRecipeConcept(WEEKLY_RECIPE_SUGGESTION, userContext, 'idea');
                         if (ideaConceptFallback) {
-                            recipeDynamicData.recipeIdea = ideaConceptFallback; // Overwrite/set recipeIdea
-                            recipeDynamicData.remixIdea = undefined; // Clear remix specific data
+                            recipeDynamicData.recipeIdea = ideaConceptFallback;
+                            recipeDynamicData.remixIdea = undefined; 
                             recipeDynamicData.originalRecipeNameForRemixDisplay = undefined;
-                            finalDeepLink = `${config.chatDeepLinkBase || "saucey://aichat?prompt="}${encodeURIComponent(ideaConceptFallback)}`;
-                            performAISuggestion = true;
-                            logger.log(`User ${userDoc.id}: Fell back from 'recipeRemix' to 'recipeIdea' successfully.`);
+                            calculatedDeepLink = `${config.chatDeepLinkBase || "saucey://aichat?prompt="}${encodeURIComponent(ideaConceptFallback)}`;
+                            performAISuggestionAndDispatch = true;
                         } else {
-                             logger.warn(`Fallback 'recipeIdea' also failed for user ${userDoc.id} after failed 'recipeRemix'. Skipping notification.`);
+                             logger.warn(`Fallback 'recipeIdea' also failed for user ${userDoc.id}. Skipping.`);
                         }
                     }
                 } else {
                     logger.warn(`No existing personal recipe found for remix strategy for user ${userDoc.id}. FALLING BACK to 'recipeIdea'.`);
-                    suggestionStrategy = "recipeIdea"; // Fallback from missing recipe for remix
+                    suggestionStrategy = "recipeIdea";
                     const ideaConceptFallback = await generateRecipeConcept(WEEKLY_RECIPE_SUGGESTION, userContext, 'idea');
                     if (ideaConceptFallback) {
                         recipeDynamicData.recipeIdea = ideaConceptFallback;
-                        finalDeepLink = `${config.chatDeepLinkBase || "saucey://aichat?prompt="}${encodeURIComponent(ideaConceptFallback)}`;
-                        performAISuggestion = true;
-                        logger.log(`User ${userDoc.id}: Fell back from 'recipeRemix' (no recipe) to 'recipeIdea' successfully.`);
+                        calculatedDeepLink = `${config.chatDeepLinkBase || "saucey://aichat?prompt="}${encodeURIComponent(ideaConceptFallback)}`;
+                        performAISuggestionAndDispatch = true;
                     } else {
-                         logger.warn(`Fallback 'recipeIdea' also failed for user ${userDoc.id} after failed 'recipeRemix' (no recipe). Skipping notification.`);
+                         logger.warn(`Fallback 'recipeIdea' also failed for user ${userDoc.id}. Skipping.`);
                     }
                 }
             }
 
-
-            // Proceed to generate notification content and send ONLY IF a suggestion was successfully prepared
-            if (performAISuggestion) {
-                recipeDynamicData.suggestionStrategy = suggestionStrategy; // Ensure correct strategy is passed
+            if (performAISuggestionAndDispatch) {
+                recipeDynamicData.suggestionStrategy = suggestionStrategy; 
+                recipeDynamicData.deepLinkOverride = calculatedDeepLink; // Pass the calculated deep link
 
                 const aiGeneratedNotificationContent = await generateNotificationContent(
                     WEEKLY_RECIPE_SUGGESTION,
                     userContext,
-                    recipeDynamicData
+                    recipeDynamicData // Pass the rich dynamic data which might include recipeName, recipeIdea, etc.
                 );
 
-                const finalDynamicData = { ...recipeDynamicData, deepLinkOverride: finalDeepLink };
-                await sendTargetedNotification(userDoc.id, WEEKLY_RECIPE_SUGGESTION, aiGeneratedNotificationContent, finalDynamicData);
+                if (aiGeneratedNotificationContent?.title && aiGeneratedNotificationContent?.body) {
+                    logger.info(`Dispatching ${WEEKLY_RECIPE_SUGGESTION} for user ${userDoc.id} with strategy '${suggestionStrategy}'`, 
+                                { userId: userDoc.id, strategy: suggestionStrategy, dynamicData: recipeDynamicData });
+                    
+                    await dispatchNotification(
+                        userDoc.id,
+                        WEEKLY_RECIPE_SUGGESTION,
+                        recipeDynamicData, // Contains recipeId, recipeName, recipeIdea, etc., AND deepLinkOverride
+                        aiGeneratedNotificationContent // Expected: { title, body, emoji }
+                    );
+                } else {
+                    logger.warn(`AI content generation failed for ${WEEKLY_RECIPE_SUGGESTION} for user ${userDoc.id}. Skipping notification.`);
+                }
             } else {
-                // This log handles cases where all strategies (including fallbacks) failed for a user.
-                logger.warn(`All suggestion strategies failed for user ${userDoc.id}. No weekly notification sent.`);
+                 logger.info(`No suitable suggestion strategy yielded content for user ${userDoc.id}. Skipping notification.`);
             }
-        }
-        logger.log(`${WEEKLY_RECIPE_SUGGESTION} trigger finished.`);
+        } // End of user loop
     } catch (error) {
-        logger.error(`Error in ${WEEKLY_RECIPE_SUGGESTION} trigger:`, error);
+        logger.error(`Error in ${WEEKLY_RECIPE_SUGGESTION} scheduled function:`, error);
     }
 });
 
@@ -313,7 +314,7 @@ exports.sendMealPlanReminders = onSchedule({ schedule: "every day 19:00", timeZo
 
                         const finalDynamicData = { ...dynamicData, deepLinkOverride: finalDeepLink };
                         const aiContent = await generateNotificationContent(MEAL_PLAN_REMINDER, userContext, dynamicData);
-                        await sendTargetedNotification(userDoc.id, MEAL_PLAN_REMINDER, aiContent, finalDynamicData);
+                        await dispatchNotification(userDoc.id, MEAL_PLAN_REMINDER, finalDynamicData, aiContent);
                     }
                 }
             }
@@ -451,11 +452,11 @@ exports.sendWeeklyRecapNotifications = onSchedule({ schedule: "every sunday 18:0
 
             // Send Notification
             const deepLink = config.defaultDeepLinkBase || "saucey://home"; // Default deep link
-            await sendTargetedNotification(
+            await dispatchNotification(
                 userDoc.id,
                 notificationType,
-                notificationContent, // This is { title, body, emoji }
-                { deepLinkOverride: deepLink } // dynamicData
+                { deepLinkOverride: deepLink }, // dynamicData
+                notificationContent // This is { title, body, emoji }
             );
             logger.info(`Successfully processed and sent ${notificationType} for user ${userDoc.id}`);
 

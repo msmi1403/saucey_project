@@ -14,6 +14,12 @@ const firestoreTriggers = require("./triggers/firestoreTriggers");
 // If you add HTTP triggers later:
 // const httpTriggers = require("./triggers/httpTriggers");
 
+// Import the new dispatcher
+const { dispatchNotification } = require("./services/sendNotification");
+
+// Export utility/service functions directly if they are meant to be called by other functions/triggers
+exports.dispatchNotification = dispatchNotification;
+
 // Export all functions from this module
 exports.notifications = {
     // Scheduled Functions
