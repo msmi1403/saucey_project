@@ -1,0 +1,32 @@
+{
+  "name": "handle-recipe-chat-turn",
+  "version": "1.0.0",
+  "description": "Cloud function to handle recipe chat interactions with Gemini.",
+  "main": "index.js",
+  "scripts": {
+    "start": "functions-framework --target=handleRecipeChatTurn --port=8081",
+    "deploy-from-here": "echo 'WARNING: Deploying from sub-directory. This might not correctly bundle shared workspace packages for Cloud Build. Recommended: Deploy from workspace root.' && gcloud functions deploy handleRecipeChatTurn --gen2 --runtime nodejs20 --region us-central1 --source . --entry-point handleRecipeChatTurn --trigger-http --allow-unauthenticated --set-env-vars GCLOUD_PROJECT=saucey-3fb0f,GCS_BUCKET_NAME=saucey-images-saucey-3fb0f,GEMINI_API_KEY_SECRET_ID=saucey-gemini-key,USERS_COLLECTION=users,RECIPES_SUBCOLLECTION=my_recipes"
+  },
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "@google-cloud/firestore": "^7.0.0",
+    "@google-cloud/functions-framework": "^3.0.0",
+    "@google-cloud/secret-manager": "^5.0.1", 
+    "@google/generative-ai": "^0.11.3",
+    "@saucey/shared": "1.0.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "axios": "^1.6.0",
+    "busboy": "^1.6.0",
+    "cheerio": "^1.0.0-rc.12",
+    "firebase-admin": "^12.0.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.0.0",
+    "mocha": "^10.0.0",
+    "supertest": "^6.0.0"
+  }
+}

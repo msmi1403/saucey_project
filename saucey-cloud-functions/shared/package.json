@@ -1,0 +1,15 @@
+{
+  "name": "@saucey/shared",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Shared utilities, services, and configurations for Saucey Cloud Functions.",
+  "main": "index.js",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@google-cloud/firestore": "^7.0.0",
+    "@google-cloud/secret-manager": "^5.0.1",
+    "@google/generative-ai": "^0.11.3",
+    "firebase-admin": "^12.0.0",
+    "uuid": "^9.0.0"
+  }
+}

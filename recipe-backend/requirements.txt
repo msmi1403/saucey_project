@@ -1,0 +1,22 @@
+# Function framework (for handling HTTP requests)
+functions-framework>=3.0.0
+
+# Google Cloud client libraries
+google-cloud-secret-manager>=2.12.0
+google-cloud-aiplatform>=1.38.0 # For Vertex AI / Gemini
+google-auth>=2.0.0
+google-cloud-firestore>=2.5.0
+google-cloud-storage>=2.0.0 # For GCS interaction
+
+# Gemini API
+google-generativeai>=0.5.0 # <<< CORRECTED LINE (was google-genai)
+
+# Web scraping and data extraction
+requests>=2.25.0 # For fetching URL content
+beautifulsoup4>=4.9.0 # For parsing HTML
+extruct>=0.11.0 # For extracting embedded metadata (JSON-LD, Microdata)
+
+Pillow>=9.0.0
+httpx>=0.23.0
+# Flask is usually installed as a dependency of functions-framework
+# uuid is part of Python's standard library

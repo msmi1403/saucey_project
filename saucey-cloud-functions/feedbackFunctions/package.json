@@ -1,0 +1,26 @@
+{
+  "name": "@saucey/feedback-functions",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloud functions for handling user feedback, summarization, and reporting.",
+  "main": "feedbackService.js",
+  "scripts": {
+    "lint": "eslint .",
+    "deploy-summary-report": "echo 'INFO: This is a sample deploy script. Adjust for your actual deployment needs.' && gcloud functions deploy summarizeAndReportFeedback --trigger-topic weekly-feedback-trigger --runtime nodejs20 --region us-central1 --source . --entry-point summarizeAndReportFeedback",
+    "deploy-cleanup-feedback": "echo 'INFO: This is a sample deploy script. Adjust for your actual deployment needs.' && gcloud functions deploy cleanupOldFeedback --trigger-topic monthly-cleanup-trigger --runtime nodejs20 --region us-central1 --source . --entry-point cleanupOldFeedback"
+  },
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "firebase-functions": "^5.0.0",
+    "@google/generative-ai": "^0.11.3",
+    "@google-cloud/secret-manager": "^5.0.1",
+    "nodemailer": "^6.9.7",
+    "@saucey/shared": "1.0.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.0.0"
+  }
+}

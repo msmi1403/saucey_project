@@ -1,0 +1,23 @@
+{
+  "sectionName": "Grocery Cart Tour",
+  "steps": [
+    {
+      "stepIndex": 0,
+      "highlightTag": "groceryCart.tabs",
+      "text": "Your list is organized! View 'All Items', or filter by items from specific recipes or those you've added manually.",
+      "arrowEdge": "bottom"
+    },
+    {
+      "stepIndex": 1,
+      "highlightTag": "groceryCart.itemRow.any",
+      "text": "Tap the circle to check an item off your list. Tap the item's name to edit its quantity or unit.",
+      "arrowEdge": "trailing"
+    },
+    {
+      "stepIndex": 2,
+      "highlightTag": "groceryCart.ellipsisMenu",
+      "text": "Use the menu for more options like sharing your list, hiding checked items, or clearing them.",
+      "arrowEdge": "bottom"
+    }
+  ]
+}

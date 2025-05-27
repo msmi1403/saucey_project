@@ -1,0 +1,48 @@
+{
+"sectionName": "AI Recipe Chat Tour",
+"steps": [
+{
+"stepIndex": 0,
+"highlightTag": "aiChat.cuisineCarousel",
+"text": "Welcome! 🍳 Tap a cuisine for inspiration, or type your own recipe idea below.",
+"arrowEdge": "top"
+},
+{
+"stepIndex": 1,
+"highlightTag": "aiChat.promptInput",
+"text": "Describe what you'd like to make. For example, 'Quick pasta with chicken and spinach' or 'Low-carb dessert ideas'.",
+"arrowEdge": "bottom"
+},
+{
+"stepIndex": 2,
+"highlightTag": "aiChat.attachmentButton",
+"text": "Got an image of a dish or a recipe URL? Tap the '+' to import or get ideas from it!",
+"arrowEdge": "bottom"
+},
+{
+"stepIndex": 3,
+"highlightTag": "aiChat.micButton",
+"text": "No mood to type? Tap the microphone and speak your recipe request!",
+"arrowEdge": "bottom"
+},
+{
+"stepIndex": 4,
+"highlightTag": "aiChat.sendButton",
+"text": "Hit send and watch the AI chef create a recipe just for you!",
+"arrowEdge": "bottom"
+},
+{
+"stepIndex": 5,
+"highlightTag": "aiChat.dietaryFiltersButton",
+"text": "Tap the filters icon to set your dietary preferences and allergies so recipes match your needs.",
+"arrowEdge": "bottom"
+},
+{
+"stepIndex": 6,
+"highlightTag": "aiChat.generationSettingsButton",
+"text": "Open generation settings to tweak chef personalities, recipe difficulty, and portion sizes.",
+"arrowEdge": "bottom"
+}
+]
+}
+

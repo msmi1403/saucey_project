@@ -1,0 +1,15 @@
+{
+  "name": "onboarding_tours",
+  "version": "1.0.0",
+  "main": "uploadTours.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "firebase-admin": "^13.4.0"
+  },
+  "description": ""
+}
