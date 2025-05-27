@@ -34,10 +34,25 @@ const handleRecipeChatTurnFns = require("./handleRecipeChatTurn");
 // This module (debugFunctions/sendDebugNotification.js) exports the 'sendDebugNotification' callable function.
 const debugNotificationFns = require("./debugFunctions/sendDebugNotification");
 
+// App Call Functions (Recipe Management)
+const recipeManagementFns = require("./app-call-functions/recipeManagement");
+
+// App Call Functions (User Profile)
+const userProfileFns = require("./app-call-functions/userProfile");
+
+// App Call Functions (Discovery)
+const discoveryFns = require("./app-call-functions/discovery");
+const recipeRetrievalFns = require("./app-call-functions/recipeRetrieval");
+
 // Notifications Module
 // This module (notifications/index.js) exports an object 'notifications' which contains
 // all notification-related functions (scheduled, Firestore-triggered, etc.).
 const notificationModule = require("./notifications");
+
+// Triggers
+const authTriggers = require("./triggers/authTriggers");
+const firestoreTriggers = require("./triggers/firestoreTriggers");
+const scheduledTriggers = require("./triggers/scheduledTriggers");
 
 
 // --- Export All Functions for Firebase Deployment ---
@@ -59,8 +74,23 @@ module.exports = {
     handleRecipeChat: handleRecipeChatTurnFns.handleRecipeChat,
 
     // --- Debug Functions ---
-    // The debugFunctions/sendDebugNotification.js exports an object like { sendDebugNotification: [Function] }
-    sendDebugNotification: debugNotificationFns.sendDebugNotification,
+    // The debugFunctions/sendDebugNotification.js now exports { sendDebugNotificationToUser: [Function] }
+    sendDebugNotificationToUser: debugNotificationFns.sendDebugNotificationToUser,
+
+    // --- App Call Functions (Recipe Management) ---
+    unpublishPublicRecipe: recipeManagementFns.unpublishPublicRecipe,
+
+    // --- App Call Functions (User Profile) ---
+    getUserAveragePublicRating: userProfileFns.getUserAveragePublicRating,
+    getCreatorProfileData: userProfileFns.getCreatorProfileData,
+    getUserTotalSaves: userProfileFns.getUserTotalSaves,
+
+    // --- App Call Functions (Discovery) ---
+    getDiscoveryFeed: discoveryFns.getDiscoveryFeed,
+    searchPublicRecipesWithTypesense: discoveryFns.searchPublicRecipesWithTypesense,
+
+    // --- App Call Functions (Recipe Retrieval) ---
+    getRecipeById: recipeRetrievalFns.getRecipeById,
 
     // --- Notifications Functions ---
     // The notifications/index.js exports an object: { notifications: { func1, func2, ... } }
@@ -68,6 +98,17 @@ module.exports = {
     // For example, if notificationModule.notifications has sendWeeklyRecipeSuggestions,
     // it will be exported as 'sendWeeklyRecipeSuggestions'.
     ...notificationModule.notifications,
+
+    // --- Auth Triggers ---
+    createDefaultChapters: authTriggers.createDefaultChapters,
+
+    // --- Firestore Triggers ---
+    updatePublicRecipeRating: firestoreTriggers.updatePublicRecipeRating,
+    handleRecipeSave: firestoreTriggers.handleRecipeSave,
+    syncRecipeToTypesense: firestoreTriggers.syncRecipeToTypesense,
+
+    // --- Scheduled Triggers ---
+    updateAllRecentSaveCounts: scheduledTriggers.updateAllRecentSaveCounts,
 };
 
 logger.log("Saucey Cloud Functions (root index.js) fully processed. All function exports are prepared for deployment.");

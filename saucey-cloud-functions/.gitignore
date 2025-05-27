@@ -78,3 +78,6 @@ cursor-agent-notes.md
 *.swp
 *~
 .DS_Store
+
+# Service account keys
+onboarding_tours/serviceAccountKey.json

@@ -11,17 +11,20 @@ async function fetchRecipeJsonLd(url) {
   console.log(`WorkspaceRecipeJsonLd(): Starting to fetch from URL: ${url}`); // Log when the function starts
 
   // 1) Download the page
-  let html;
+  let htmlContent; // Renamed from html to htmlContent for clarity
   try {
     const response = await axios.get(url, { timeout: 10_000 });
-    html = response.data;
+    htmlContent = response.data;
     console.log(`WorkspaceRecipeJsonLd(): Successfully downloaded HTML from ${url}`);
   } catch (error) {
     console.error(`WorkspaceRecipeJsonLd(): Error downloading HTML from ${url}:`, error.message);
-    throw new Error(`Failed to download HTML from ${url}: ${error.message}`); // Re-throw or handle as appropriate
+    // Return null for recipe and the (possibly partial or null) htmlContent on download error
+    // So the caller can decide if it wants to try processing partial HTML if any was received
+    // or just fail. For now, let's ensure htmlContent is at least an empty string if it's truly null/undefined.
+    return { recipe: null, htmlContent: htmlContent || "" }; 
   }
 
-  const $ = cheerio.load(html);
+  const $ = cheerio.load(htmlContent);
   let recipe = null;
 
   // *** IDEAL PLACE FOR YOUR DEBUGGING LOGS ***
@@ -81,16 +84,18 @@ async function fetchRecipeJsonLd(url) {
     }
   });
 
-  // 5) If still nothing, error out
+  // 5) If still nothing, error out -> Modify this to not throw, but return null for recipe
   if (!recipe) {
     console.warn(`WorkspaceRecipeJsonLd(): No Recipe object found after checking all script tags for ${url}.`);
-    throw new Error(
-      'No <script type="application/ld+json"> with a Recipe object found on page'
-    );
+    // throw new Error(
+    //   'No <script type="application/ld+json"> with a Recipe object found on page'
+    // );
+    // Instead of throwing, return null for recipe, but still return the htmlContent
+    return { recipe: null, htmlContent }; 
   }
 
   console.log(`WorkspaceRecipeJsonLd(): Successfully found Recipe object for ${url}.`);
-  return recipe;
+  return { recipe, htmlContent }; // Return both
 }
 
 module.exports = { fetchRecipeJsonLd };

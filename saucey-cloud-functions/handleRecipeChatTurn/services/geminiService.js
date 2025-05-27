@@ -2,6 +2,7 @@
 
 const geminiClient = require('@saucey/shared/services/geminiClient.js'); 
 const { extractJsonFromText } = require('@saucey/shared/utils/commonUtils.js'); 
+const { modelsInitializationPromise } = require('@saucey/shared/services/geminiClient.js');
 
 const config = require('../config');
 
@@ -170,32 +171,37 @@ After you output the JSON, re-print it in a fenced code block and append on a ne
 
 async function getRecipeFromPageText(pageTextContent, userInstructions, sourceUrl, chefPreambleString = config.CHEF_PERSONALITY_PROMPTS.standard) {
     await modelsInitializationPromise;
+
     const systemPromptText = config.DETAILED_RECIPE_JSON_SCHEMA_PROMPT.system;
     const standardChefPreamble = config.CHEF_PERSONALITY_PROMPTS.standard || "You are a helpful, expert, and friendly cooking assistant.";
     let personalityInstruction = "";
-     if (chefPreambleString && chefPreambleString.trim() !== "" && chefPreambleString !== standardChefPreamble) {
-      personalityInstruction = chefPreambleString + "\n\nNow, considering the extracted page content and user's instructions:\n";
+
+    if (chefPreambleString && chefPreambleString.trim() !== "" && chefPreambleString !== standardChefPreamble) {
+      personalityInstruction = chefPreambleString + "\n\nNow, considering the following text extracted from a webpage and the user's query:\n";
     } else if (standardChefPreamble.trim() !== "") {
-        personalityInstruction = standardChefPreamble + "\n\nNow, considering the extracted page content and user's instructions:\n";
+        personalityInstruction = standardChefPreamble + "\n\nNow, considering the following text extracted from a webpage and the user's query:\n";
     }
 
-    let userTurnText = `${personalityInstruction}The following text was extracted from a webpage (${sourceUrl || 'unknown source'}). Please extract the recipe details from it and structure it as a recipe JSON object according to the schema provided in the system instructions. Prioritize accuracy and completeness based on the provided text.\n\nExtracted Page Content:\n"""\n${pageTextContent.substring(0, 15000)}\n"""\n`;
+    let userTurnText = `${personalityInstruction}`;
+    userTurnText += `Source URL (for context only, content below is extracted): ${sourceUrl}\n`;
     if (userInstructions && userInstructions.trim() !== "") {
-        userTurnText += `\n\nApply the following user modifications/instructions to the extracted recipe: "${userInstructions}"`;
+        userTurnText += `User's specific instructions for this URL: "${userInstructions}"\n\n`;
     }
-    userTurnText += `\n\nRemember to generate a new "recipeId" for this imported recipe. After you output the JSON, re-print it in a fenced code block and append on a new line: "✅ VALID JSON" if it strictly conforms to the schema, or "❌ INVALID JSON" otherwise.`;
+    userTurnText += "Extracted Page Content:\n---\n" + pageTextContent + "\n---";
+    
+    console.log(`Recipe Gemini Service (Page Text): Sending request for URL ${sourceUrl}. Using model ${config.GEMINI_MODEL_NAME}. Text length: ${pageTextContent.length}`);
 
-    console.log(`Recipe Gemini Service (Page Text): Processing. Using model ${config.GEMINI_MODEL_NAME}.`);
     try {
         const response = await geminiClient.generateContent({
             modelName: config.GEMINI_MODEL_NAME,
             contents: [{ role: "user", parts: [{ text: userTurnText }] }],
             systemInstruction: { parts: [{ text: systemPromptText }] },
-            generationConfig: recipeDefaultGenerationConfig,
-            safetySettings: recipeSafetySettings,
+            generationConfig: config.recipeDefaultGenerationConfig,
+            safetySettings: config.recipeSafetySettings,
         });
+        
         const responseText = response.text();
-        console.log(`Raw Recipe Gemini page text response: ${responseText.substring(0, 500)}...`);
+        console.log(`Raw Recipe Gemini (from page text) response for ${sourceUrl}: ${responseText.substring(0, 500)}...`);
         return extractJsonFromText(responseText);
     } catch (error) {
         console.error(`Error in getRecipeFromPageText for URL ${sourceUrl} (Recipe Service):`, error.message);
@@ -253,20 +259,19 @@ async function correctRecipeJson(originalUserQuery, erroneousJsonString, ajvErro
     let correctionPrompt = `${chefPreambleString}\n\nThe previous attempt to generate a recipe JSON based on the user's request resulted in a JSON object that failed schema validation. Please correct it.`;
     correctionPrompt += `\n\nOriginal User Request Context: "${originalUserQuery}"`;
     correctionPrompt += `\n\nErroneous JSON Output:\n\`\`\`json\n${erroneousJsonString}\n\`\`\``;
-    correctionPrompt += `\n\nValidation Errors (from Ajv):\n\`\`\`json\n${JSON.stringify(ajvErrors, null, 2)}\n\`\`\``;
-    correctionPrompt += `\n\nPlease analyze the errors and the original JSON. Your task is to fix the JSON so that it strictly conforms to the schema provided in the main system instructions and accurately reflects the original user request. Ensure all data types and structures are correct as per the schema. Maintain the original intent and data as much as possible, only making changes necessary to fix the validation errors and ensure schema compliance.`;
-    correctionPrompt += `\n\nOutput ONLY the corrected, complete, and valid JSON object. Do not include any other commentary, apologies, or introductory text.`;
-    correctionPrompt += `\nAfter you output the corrected JSON, re-print that JSON in a fenced code block and append on a new line: "✅ VALID JSON" if it strictly conforms to the schema, or "❌ INVALID JSON" otherwise.`;
 
     const formattedApiHistory = chatHistory.map(msg => ({
-        role: msg.role, parts: msg.parts.map(p => ({ text: p.text }))
+        role: msg.role,
+        parts: msg.parts.map(p => ({ text: p.text }))
     })).filter(Boolean);
+
     const contentsForApi = [
         ...formattedApiHistory,
         { role: "user", parts: [{ text: correctionPrompt }] }
     ];
 
-    console.log(`Recipe Gemini Service (JSON Correction): Processing. Using model ${config.GEMINI_MODEL_NAME}.`);
+    console.log(`Recipe Gemini Service (Correct Recipe JSON): Sending ${formattedApiHistory.length} history turns. Using model ${config.GEMINI_MODEL_NAME}.`);
+
     try {
         const response = await geminiClient.generateContent({
             modelName: config.GEMINI_MODEL_NAME,
@@ -275,44 +280,12 @@ async function correctRecipeJson(originalUserQuery, erroneousJsonString, ajvErro
             generationConfig: recipeDefaultGenerationConfig,
             safetySettings: recipeSafetySettings,
         });
+        
         const responseText = response.text();
-        console.log(`Raw Recipe Gemini correction response: ${responseText.substring(0, 500)}...`);
+        console.log(`Raw Recipe Gemini correct recipe JSON response: ${responseText.substring(0, 500)}...`);
         return extractJsonFromText(responseText);
     } catch (error) {
         console.error("Error in correctRecipeJson (Recipe Service):", error.message);
-        throw error;
-    }
-}
-
-async function getInstructionsFromRecipeJson(recipeJsonString, userFollowUpPrompt = "") {
-    await modelsInitializationPromise;
-    let promptText = `Here is a recipe in JSON format:\n\n\`\`\`json\n${recipeJsonString}\n\`\`\``;
-    const followUpText = userFollowUpPrompt || "";
-
-    if (followUpText.trim() !== "") {
-        promptText += `\n\nUser request regarding these instructions: "${followUpText.trim()}"`;
-    }
-    promptText += `\n\nPlease provide clear, step-by-step cooking instructions suitable for a home cook based on this recipe and the user's request (if any).\nRespond with ONLY the cooking instructions as plain text. Do not include any preamble, introduction, or the original JSON. Just the instructions.`;
-
-    const instructionsGenConfig = {
-        temperature: config.GEMINI_TEXT_TEMPERATURE || 0.5,
-        maxOutputTokens: config.GEMINI_TEXT_MAX_OUTPUT_TOKENS || 2048,
-        // No responseMimeType: "application/json" here, as we expect plain text
-    };
-
-    console.log(`Recipe Gemini Service (Instructions): Processing. Using model ${config.GEMINI_MODEL_NAME}.`);
-    try {
-        const response = await geminiClient.generateContent({
-            modelName: config.GEMINI_MODEL_NAME,
-            contents: [{ role: "user", parts: [{ text: promptText }] }],
-            generationConfig: instructionsGenConfig,
-            safetySettings: recipeSafetySettings,
-        });
-        const responseText = response.text();
-        console.log(`Raw Recipe Gemini text response (instructions): ${responseText.substring(0, 500)}...`);
-        return responseText; // Expecting plain text
-    } catch (error) {
-        console.error("Error in getInstructionsFromRecipeJson (Recipe Service):", error.message);
         throw error;
     }
 }
@@ -321,7 +294,7 @@ module.exports = {
     getRecipeFromTextChat,
     getRecipeFromImage,
     getRecipeFromPageText,
-    getInstructionsFromRecipeJson,
     getRecipeTitlesOnly,
     correctRecipeJson,
+    // buildCurrentUserTurnContextualPrompt, // Only if it needs to be exported, typically a helper
 };

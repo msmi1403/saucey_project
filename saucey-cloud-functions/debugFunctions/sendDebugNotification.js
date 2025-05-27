@@ -1,4 +1,4 @@
-// saucey-cloud-functions/debugNotification/sendDebugNotification.js
+// saucey-cloud-functions/debugFunctions/sendDebugNotification.js
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const { logger } = functions; // Using functions.logger
@@ -12,17 +12,17 @@ const { logger } = functions; // Using functions.logger
 const db = admin.firestore();
 const messaging = admin.messaging();
 
-// Ensuring the export name matches what's likely used in root index.js for clarity
-exports.sendDebugNotification = functions.https.onCall(async (data, context) => {
-  logger.info("--- sendDebugNotification invoked ---"); // Changed to logger.info
+// Renaming to match iOS call
+exports.sendDebugNotificationToUser = functions.https.onCall(async (data, context) => {
+  logger.info("--- sendDebugNotificationToUser invoked ---"); // Changed to logger.info
 
   // Authentication Check
   if (!context.auth) {
-    logger.warn('sendDebugNotification: Unauthenticated access attempt.', { data }); // Changed to logger.warn
+    logger.warn('sendDebugNotificationToUser: Unauthenticated access attempt.', { data }); // Changed to logger.warn
     throw new functions.https.HttpsError('unauthenticated', 'The function must be called while authenticated.');
   }
   // Optional: Log authenticated user for auditing
-  logger.info('sendDebugNotification: Authenticated user', { userId: context.auth.uid, data }); // Changed to logger.info
+  logger.info('sendDebugNotificationToUser: Authenticated user', { userId: context.auth.uid, data }); // Changed to logger.info
 
   // Safely log keys of the wrapper 'data' object
   // if (data && typeof data === 'object') { // This check is for the outer 'data' which is standard for onCall
@@ -40,7 +40,7 @@ exports.sendDebugNotification = functions.https.onCall(async (data, context) => 
   const clientPayload = data; 
 
   if (!clientPayload) {
-    logger.error("sendDebugNotification: 'clientPayload' (data) is missing or undefined.", { contextAuth: context.auth }); // Changed to logger.error
+    logger.error("sendDebugNotificationToUser: 'clientPayload' (data) is missing or undefined.", { contextAuth: context.auth }); // Changed to logger.error
     throw new functions.https.HttpsError("invalid-argument", "Client payload (data) is missing. Cannot retrieve arguments.");
   }
 
@@ -56,11 +56,11 @@ exports.sendDebugNotification = functions.https.onCall(async (data, context) => 
   // For a debug function, often an admin might trigger this for *another* userId.
   // So, we'll proceed with the userId from the payload but ensure it's provided.
   if (!userId) {
-    logger.error("sendDebugNotification: userId is missing or falsy within clientPayload.", { clientPayload, contextAuth: context.auth }); // Changed to logger.error
+    logger.error("sendDebugNotificationToUser: userId is missing or falsy within clientPayload.", { clientPayload, contextAuth: context.auth }); // Changed to logger.error
     throw new functions.https.HttpsError("invalid-argument", "The function must be called with a 'userId' argument in the payload.");
   }
 
-  logger.info(`sendDebugNotification: Proceeding for target userId: ${userId}`, { authenticatedUserId: context.auth.uid }); // Changed to logger.info
+  logger.info(`sendDebugNotificationToUser: Proceeding for target userId: ${userId}`, { authenticatedUserId: context.auth.uid }); // Changed to logger.info
   logger.info(`Attempting to send notification: Title='${notificationTitle}', Body='${notificationBody}', DeepLink='${deepLink}'`, { targetUserId: userId }); // Changed to logger.info
 
   try {
@@ -68,7 +68,7 @@ exports.sendDebugNotification = functions.https.onCall(async (data, context) => 
     const userDoc = await userDocRef.get();
 
     if (!userDoc.exists) {
-      logger.error(`sendDebugNotification: User document not found for target userId: ${userId}`, { authenticatedUserId: context.auth.uid }); // Changed to logger.error
+      logger.error(`sendDebugNotificationToUser: User document not found for target userId: ${userId}`, { authenticatedUserId: context.auth.uid }); // Changed to logger.error
       // For onCall, it's better to throw an HttpsError or return a structured error if that's the API contract.
       // Since this is a debug utility, returning a success:false is acceptable if client expects it.
       // However, to be consistent with HttpsError usage:
@@ -77,10 +77,10 @@ exports.sendDebugNotification = functions.https.onCall(async (data, context) => 
 
     const userData = userDoc.data();
     const fcmTokens = userData?.fcmTokens || [];
-    logger.info(`sendDebugNotification: Found FCM tokens for target user ${userId}: ${fcmTokens.length} tokens.`, { authenticatedUserId: context.auth.uid, fcmTokens }); // Changed to logger.info
+    logger.info(`sendDebugNotificationToUser: Found FCM tokens for target user ${userId}: ${fcmTokens.length} tokens.`, { authenticatedUserId: context.auth.uid, fcmTokens }); // Changed to logger.info
 
     if (fcmTokens.length === 0) {
-      logger.info(`sendDebugNotification: No FCM tokens found for target user: ${userId}. Cannot send notification.`, { authenticatedUserId: context.auth.uid }); // Changed to logger.info
+      logger.info(`sendDebugNotificationToUser: No FCM tokens found for target user: ${userId}. Cannot send notification.`, { authenticatedUserId: context.auth.uid }); // Changed to logger.info
       // Similar to above, could throw or return structure.
       throw new functions.https.HttpsError("failed-precondition", `User ${userId} has no registered FCM tokens.`);
     }
@@ -104,15 +104,15 @@ exports.sendDebugNotification = functions.https.onCall(async (data, context) => 
       },
     };
 
-    logger.info(`sendDebugNotification: Constructed FCM payload for ${fcmTokens.length} tokens. Notification title: ${notificationTitle}`, { targetUserId: userId, authenticatedUserId: context.auth.uid }); // Changed to logger.info
+    logger.info(`sendDebugNotificationToUser: Constructed FCM payload for ${fcmTokens.length} tokens. Notification title: ${notificationTitle}`, { targetUserId: userId, authenticatedUserId: context.auth.uid }); // Changed to logger.info
     const response = await messaging.sendEachForMulticast(payload);
-    logger.info(`sendDebugNotification: FCM sendEachForMulticast response for target user ${userId}: Successes: ${response.successCount}, Failures: ${response.failureCount}`, { authenticatedUserId: context.auth.uid }); // Changed to logger.info
+    logger.info(`sendDebugNotificationToUser: FCM sendEachForMulticast response for target user ${userId}: Successes: ${response.successCount}, Failures: ${response.failureCount}`, { authenticatedUserId: context.auth.uid }); // Changed to logger.info
 
     response.responses.forEach((resp, idx) => {
       if (resp.success) {
-        logger.info(`sendDebugNotification: Successfully sent message to token [${idx}]: ${fcmTokens[idx]}, Message ID: ${resp.messageId}`, { targetUserId: userId, authenticatedUserId: context.auth.uid }); // Changed to logger.info
+        logger.info(`sendDebugNotificationToUser: Successfully sent message to token [${idx}]: ${fcmTokens[idx]}, Message ID: ${resp.messageId}`, { targetUserId: userId, authenticatedUserId: context.auth.uid }); // Changed to logger.info
       } else {
-        logger.error(`sendDebugNotification: Failed to send message to token [${idx}]: ${fcmTokens[idx]}`, { errorInfo: resp.error, targetUserId: userId, authenticatedUserId: context.auth.uid }); // Changed to logger.error
+        logger.error(`sendDebugNotificationToUser: Failed to send message to token [${idx}]: ${fcmTokens[idx]}`, { errorInfo: resp.error, targetUserId: userId, authenticatedUserId: context.auth.uid }); // Changed to logger.error
       }
     });
 
@@ -131,14 +131,14 @@ exports.sendDebugNotification = functions.https.onCall(async (data, context) => 
       });
 
       if (tokensToRemove.length > 0) {
-        logger.info(`sendDebugNotification: Tokens to remove for target user ${userId}:`, { tokensToRemove, authenticatedUserId: context.auth.uid }); // Changed to logger.info
+        logger.info(`sendDebugNotificationToUser: Tokens to remove for target user ${userId}:`, { tokensToRemove, authenticatedUserId: context.auth.uid }); // Changed to logger.info
         try {
           await userDocRef.update({
             fcmTokens: admin.firestore.FieldValue.arrayRemove(...tokensToRemove),
           });
-          logger.info(`sendDebugNotification: Successfully removed ${tokensToRemove.length} invalid FCM tokens for target user ${userId}.`, { authenticatedUserId: context.auth.uid }); // Changed to logger.info
+          logger.info(`sendDebugNotificationToUser: Successfully removed ${tokensToRemove.length} invalid FCM tokens for target user ${userId}.`, { authenticatedUserId: context.auth.uid }); // Changed to logger.info
         } catch (tokenCleanupError) {
-          logger.error(`sendDebugNotification: Error removing invalid FCM tokens for target user ${userId}:`, { error: tokenCleanupError, authenticatedUserId: context.auth.uid }); // Changed to logger.error
+          logger.error(`sendDebugNotificationToUser: Error removing invalid FCM tokens for target user ${userId}:`, { error: tokenCleanupError, authenticatedUserId: context.auth.uid }); // Changed to logger.error
         }
       }
     }
@@ -150,7 +150,7 @@ exports.sendDebugNotification = functions.https.onCall(async (data, context) => 
     throw new functions.https.HttpsError("unavailable", `Failed to send any messages. FCM Failures: ${response.failureCount}. Check function logs for details.`);
 
   } catch (error) {
-    logger.error(`sendDebugNotification: Unhandled error for target userId ${userId}:`, { error, authenticatedUserId: context.auth.uid }); // Changed to logger.error
+    logger.error(`sendDebugNotificationToUser: Unhandled error for target userId ${userId}:`, { error, authenticatedUserId: context.auth.uid }); // Changed to logger.error
     if (error instanceof functions.https.HttpsError) {
       throw error;
     }
