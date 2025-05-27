@@ -4,7 +4,7 @@ const { logger } = require("firebase-functions/v2");
 const firestoreHelper = require("@saucey/shared/services/firestoreHelper");
 const { analyzeUserActivityAndPrefs } = require("../aiLogic/userAnalyzer");
 const { generateNotificationContent } = require("../aiLogic/notificationGenerator");
-const { sendTargetedNotification } = require("../services/notificationSender");
+const { dispatchNotification } = require("../services/sendNotification");
 const { notificationConfigs } = require("../config/notificationConfig");
 
 const NEW_RECIPE_FROM_CREATOR = "newRecipeFromCreator";
@@ -33,21 +33,26 @@ exports.notifyFollowersOnNewRecipe = onDocumentCreated("recipes/{recipeId}", asy
     const recipeData = snapshot.data();
     const recipeId = event.params.recipeId;
 
+    // Ensure it's a public recipe if that's the intent for this notification type
+    // This depends on your business logic - if only *public* new recipes trigger this.
+    // Assuming 'isPublic' field exists. If not, adjust or remove this check.
+    if (recipeData.isPublic !== true) {
+        logger.log(`Recipe ${recipeId} is not public. No follower notifications will be sent.`);
+        return null;
+    }
+
     if (!recipeData.creatorId || !recipeData.name) {
-        logger.warn("New recipe data is missing creatorId or name. Cannot send notifications.", recipeData);
+        logger.warn("New recipe data is missing creatorId or name. Cannot send notifications.", { recipeId, recipeData });
         return null;
     }
 
     const creatorId = recipeData.creatorId;
     const recipeName = recipeData.name;
 
-    // Fetch creator's profile to get their display name
-    const creatorProfile = await firestoreHelper.getDocument("users", creatorId); // Assuming creators are also users
-    const creatorName = creatorProfile ? creatorProfile.displayName : "A Saucey Chef";
+    const creatorProfile = await firestoreHelper.getDocument("users", creatorId);
+    const creatorName = creatorProfile?.displayName || "A Saucey Chef";
 
     try {
-        // Find users who follow this creator
-        // This query depends heavily on your Firestore structure for "follows"
         const followersSnapshot = await firestoreHelper.getCollection("users", {
             where: [{ field: "followedCreators", operator: "array-contains", value: creatorId }]
         });
@@ -57,34 +62,47 @@ exports.notifyFollowersOnNewRecipe = onDocumentCreated("recipes/{recipeId}", asy
             return null;
         }
 
-        logger.log(`Found ${followersSnapshot.length} followers for creator ${creatorId}. Notifying them...`);
+        logger.log(`Found ${followersSnapshot.length} followers for creator ${creatorId}. Notifying them about recipe '${recipeName}' (ID: ${recipeId}).`);
 
         for (const followerDoc of followersSnapshot) {
-            if (followerDoc.id && followerDoc.fcmTokens && followerDoc.fcmTokens.length > 0) {
-                // Avoid notifying the creator themselves if they somehow follow themselves
-                if (followerDoc.id === creatorId) continue;
+            if (followerDoc.id === creatorId) {
+                 logger.debug(`Skipping notification to creator ${creatorId} (themselves).`);
+                 continue;
+            }
+            // Most checks (fcmTokens, preferences) are now handled by dispatchNotification.
+            logger.log(`Processing follower ${followerDoc.id} for new recipe from ${creatorName}`);
 
-                logger.log(`Processing follower ${followerDoc.id} for new recipe from ${creatorName}`);
+            const userContext = await analyzeUserActivityAndPrefs(followerDoc.id, followerDoc);
+            if (!userContext) {
+                logger.warn(`Could not generate context for follower ${followerDoc.id}. Skipping.`);
+                continue;
+            }
 
-                const userContext = await analyzeUserActivityAndPrefs(followerDoc.id, followerDoc);
-                if (!userContext) {
-                    logger.warn(`Could not generate context for follower ${followerDoc.id}. Skipping.`);
-                    continue;
-                }
+            const dynamicData = {
+                recipeId: recipeId,
+                recipeName: recipeName,
+                creatorName: creatorName,
+                suggestionStrategy: "newFromCreator" // For logging/analytics
+                // deepLinkOverride will be constructed by dispatchNotification using recipeId and defaultDeepLinkBase
+            };
 
-                const dynamicData = {
-                    recipeId: recipeId,
-                    recipeName: recipeName,
-                    creatorName: creatorName,
-                };
+            const aiContent = await generateNotificationContent(
+                NEW_RECIPE_FROM_CREATOR,
+                userContext, 
+                dynamicData
+            );
 
-                const aiContent = await generateNotificationContent(
-                    NEW_RECIPE_FROM_CREATOR,
-                    userContext, // userContext here is for the *follower*
-                    dynamicData
+            if (aiContent?.title && aiContent?.body) {
+                logger.info(`Dispatching ${NEW_RECIPE_FROM_CREATOR} to follower ${followerDoc.id} for recipe ${recipeId}.`, 
+                            { followerId: followerDoc.id, recipeId, creatorName });
+                await dispatchNotification(
+                    followerDoc.id, 
+                    NEW_RECIPE_FROM_CREATOR, 
+                    dynamicData, 
+                    aiContent
                 );
-
-                await sendTargetedNotification(followerDoc.id, NEW_RECIPE_FROM_CREATOR, aiContent, dynamicData);
+            } else {
+                logger.warn(`AI content generation failed for ${NEW_RECIPE_FROM_CREATOR} for follower ${followerDoc.id}. Skipping.`);
             }
         }
         logger.log(`Finished notifying followers for new recipe ${recipeId} from creator ${creatorId}.`);

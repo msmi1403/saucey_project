@@ -266,9 +266,6 @@ exports.sendWeeklyRecipeSuggestions = onSchedule({ schedule: "every monday 10:50
 
 // --- sendMealPlanReminders function (ensure it's robust as per previous versions) ---
 exports.sendMealPlanReminders = onSchedule({ schedule: "every day 19:00", timeZone: "America/New_York" }, async (event) => {
-    // ... (ensure this function is using the latest robust logic for deep links and error handling)
-    // For brevity, keeping it as previously provided, assuming it's up to date.
-    // The key is that `finalDynamicData` with `deepLinkOverride` is correctly passed to sendTargetedNotification.
     logger.log(`Running ${MEAL_PLAN_REMINDER} trigger. Event ID: ${event.id || 'N/A'}`);
     const config = notificationConfigs[MEAL_PLAN_REMINDER];
     if (!config || !config.isEnabled) {
@@ -282,7 +279,9 @@ exports.sendMealPlanReminders = onSchedule({ schedule: "every day 19:00", timeZo
 
         const usersSnapshot = await firestoreHelper.getCollection("users");
         for (const userDoc of usersSnapshot) {
-            if (!userDoc.id || !userDoc.fcmTokens || userDoc.fcmTokens.length === 0) continue;
+            // Early skip for users without ID handled by dispatchNotification, but fcmTokens check can be here.
+            // dispatchNotification will also handle preferences.
+            logger.log(`Processing user ${userDoc.id} for ${MEAL_PLAN_REMINDER}`);
 
             const mealPlanDoc = await firestoreHelper.getDocument(`users/${userDoc.id}/mealPlans`, tomorrowDateString);
             if (mealPlanDoc && mealPlanDoc.meals && mealPlanDoc.meals.length > 0) {
@@ -298,23 +297,40 @@ exports.sendMealPlanReminders = onSchedule({ schedule: "every day 19:00", timeZo
                             recipeId: meal.recipeId,
                             recipeName: meal.recipeName,
                             mealType: meal.mealType,
-                            suggestionStrategy: "existingRecipe"
+                            suggestionStrategy: "mealPlanItem" // Specific strategy for this type
                         };
 
-                        let finalDeepLink = config.defaultDeepLinkBase || `saucey://mealplan`;
+                        let calculatedDeepLink = config.defaultDeepLinkBase || `saucey://mealplan`;
                         if (dynamicData.recipeId && config.defaultDeepLinkBase && config.defaultDeepLinkBase.includes("recipe")) {
-                             finalDeepLink = config.defaultDeepLinkBase.endsWith('/') ?
+                             calculatedDeepLink = config.defaultDeepLinkBase.endsWith('/') ?
                                 `${config.defaultDeepLinkBase}${dynamicData.recipeId}` :
                                 `${config.defaultDeepLinkBase}/${dynamicData.recipeId}`;
                         } else if (config.defaultDeepLinkBase && config.defaultDeepLinkBase.includes("mealplan") && tomorrowDateString) {
-                            finalDeepLink = config.defaultDeepLinkBase.endsWith('/') ?
+                            // Ensure specific meal plan day link if applicable, otherwise general meal plan link
+                            calculatedDeepLink = config.defaultDeepLinkBase.endsWith('/') ?
                                 `${config.defaultDeepLinkBase}${tomorrowDateString}` :
-                                `${config.defaultDeepLinkBase}/${tomorrowDateString}`;
+                                `${config.defaultDeepLinkBase}/${tomorrowDateString}`; 
                         }
+                        // If linking directly to a recipe in a meal plan, make sure the link reflects that, 
+                        // or use a general meal plan page for the specific day.
+                        // For now, the above logic tries to link to recipe or meal plan day.
 
-                        const finalDynamicData = { ...dynamicData, deepLinkOverride: finalDeepLink };
+                        dynamicData.deepLinkOverride = calculatedDeepLink;
+                        
                         const aiContent = await generateNotificationContent(MEAL_PLAN_REMINDER, userContext, dynamicData);
-                        await dispatchNotification(userDoc.id, MEAL_PLAN_REMINDER, finalDynamicData, aiContent);
+
+                        if (aiContent?.title && aiContent?.body) {
+                            logger.info(`Dispatching ${MEAL_PLAN_REMINDER} for user ${userDoc.id}, recipe ${meal.recipeName}`, 
+                                        { userId: userDoc.id, dynamicData });
+                            await dispatchNotification(
+                                userDoc.id, 
+                                MEAL_PLAN_REMINDER, 
+                                dynamicData, 
+                                aiContent
+                            );
+                        } else {
+                            logger.warn(`AI content generation failed for ${MEAL_PLAN_REMINDER} for user ${userDoc.id}, meal ${meal.recipeName}. Skipping.`);
+                        }
                     }
                 }
             }
@@ -323,7 +339,6 @@ exports.sendMealPlanReminders = onSchedule({ schedule: "every day 19:00", timeZo
     } catch (error) {
         logger.error(`Error in ${MEAL_PLAN_REMINDER} trigger:`, error);
     }
-    logger.log("Finished processing sendMealPlanReminders.");
 });
 
 // New Scheduled Function for Weekly Recap
@@ -338,14 +353,9 @@ exports.sendWeeklyRecapNotifications = onSchedule({ schedule: "every sunday 18:0
     }
 
     try {
-        // TODO: Add filtering for active users with FCM tokens if not done by default in getCollection or user analysis
         const usersSnapshot = await firestoreHelper.getCollection("users");
 
         for (const userDoc of usersSnapshot) {
-            if (!userDoc.id || !userDoc.fcmTokens || userDoc.fcmTokens.length === 0) {
-                logger.info(`Skipping user ${userDoc.id || 'unknown'} for ${notificationType} due to missing ID or FCM tokens.`);
-                continue;
-            }
             logger.log(`Processing user ${userDoc.id} for ${notificationType}`);
 
             const userContext = await analyzeUserActivityAndPrefs(userDoc.id, userDoc);
@@ -354,10 +364,8 @@ exports.sendWeeklyRecapNotifications = onSchedule({ schedule: "every sunday 18:0
                 continue;
             }
 
-            // Fetch cooking activity for the past 7 days
             const sevenDaysAgo = new Date();
             sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
             let cookLogEntries = [];
             try {
                 cookLogEntries = await firestoreHelper.getCollection(`users/${userDoc.id}/cook_log`, {
@@ -366,57 +374,37 @@ exports.sendWeeklyRecapNotifications = onSchedule({ schedule: "every sunday 18:0
                 });
             } catch (logError) {
                 logger.error(`Error fetching cook_log for user ${userDoc.id}:`, logError);
-                // Continue, will result in "didn't log any cooking" message
             }
-
             let weeklyCookingSummaryString;
             if (cookLogEntries.length > 0) {
-                // Fetch recipe names asynchronously
                 const recipeNamePromises = cookLogEntries.map(async (entry) => {
                     if (entry.recipeId) {
                         try {
-                            // Assuming cook_log entries might not have a 'source' field to distinguish
-                            // between 'my_recipes' and 'public_recipes'.
-                            // We'll try 'my_recipes' first, then 'public_recipes'.
-                            // You might need a more robust way to determine the source if it varies.
                             let recipeDoc = await firestoreHelper.getDocument(`users/${userDoc.id}/my_recipes`, entry.recipeId);
-                            if (recipeDoc && recipeDoc.title) {
-                                return recipeDoc.title;
-                            }
-                            // Fallback to public_recipes if not found in user's recipes or if no title
+                            if (recipeDoc && recipeDoc.title) return recipeDoc.title;
                             recipeDoc = await firestoreHelper.getDocument('public_recipes', entry.recipeId);
-                            if (recipeDoc && recipeDoc.title) {
-                                return recipeDoc.title;
-                            }
-                            return entry.recipeName || "a recipe"; // Fallback if not found or no title
+                            if (recipeDoc && recipeDoc.title) return recipeDoc.title;
+                            return entry.recipeName || "a recipe";
                         } catch (fetchError) {
                             logger.warn(`Error fetching recipe title for ID ${entry.recipeId}, user ${userDoc.id}:`, fetchError);
-                            return entry.recipeName || "a recipe"; // Fallback on error
+                            return entry.recipeName || "a recipe"; 
                         }
                     }
-                    return entry.recipeName || "a recipe"; // Fallback if no recipeId
+                    return entry.recipeName || "a recipe";
                 });
-
                 const resolvedRecipeNames = (await Promise.all(recipeNamePromises)).slice(0, 2);
-
                 const cuisines = [...new Set(cookLogEntries.map(entry => entry.cuisine).filter(c => c))];
                 let summary = `This week you cooked ${cookLogEntries.length} recipe${cookLogEntries.length > 1 ? 's' : ''}`;
-                if (resolvedRecipeNames.length > 0) {
-                    summary += `, including ${resolvedRecipeNames.join(' and ')}`;
-                }
-                if (cuisines.length > 0) {
-                    summary += `. You explored ${cuisines.join(', ')} cuisine${cuisines.length > 1 ? 's' : ''}!`;
-                } else {
-                    summary += "!";
-                }
+                if (resolvedRecipeNames.length > 0) summary += `, including ${resolvedRecipeNames.join(' and ')}`;
+                if (cuisines.length > 0) summary += `. You explored ${cuisines.join(', ')} cuisine${cuisines.length > 1 ? 's' : ''}!`;
+                else summary += "!";
                 weeklyCookingSummaryString = summary;
             } else {
                 weeklyCookingSummaryString = "This week you didn\'t log any cooking. Time to find a new favorite!";
             }
             logger.info(`User ${userDoc.id} weekly summary: "${weeklyCookingSummaryString}"`);
 
-            // Determine nextWeekFocusString
-            let nextWeekFocusString = "Explore a new recipe genre this week!"; // Default focus
+            let nextWeekFocusString = "Explore a new recipe genre this week!";
             const focusPromptName = 'aiSystemPromptForNextWeekFocus';
             if (config[focusPromptName]) {
                 const generatedFocus = await generateTextualInsight(
@@ -424,46 +412,41 @@ exports.sendWeeklyRecapNotifications = onSchedule({ schedule: "every sunday 18:0
                     userContext,
                     { PAST_WEEK_COOKING_SUMMARY: weeklyCookingSummaryString }
                 );
-                if (generatedFocus) {
-                    nextWeekFocusString = generatedFocus;
-                } else {
-                    logger.warn(`Failed to generate next week focus for user ${userDoc.id}. Using default.`);
-                }
+                if (generatedFocus) nextWeekFocusString = generatedFocus;
+                else logger.warn(`Failed to generate next week focus for user ${userDoc.id}. Using default.`);
             } else {
                 logger.warn(`'${focusPromptName}' not found in config. Using default focus for user ${userDoc.id}.`);
             }
             logger.info(`User ${userDoc.id} next week focus: "${nextWeekFocusString}"`);
 
-            // Generate Notification Content
-            let notificationContent = await generateRecapNotificationInternal(
+            let aiGeneratedNotificationContent = await generateRecapNotificationInternal(
                 userContext,
                 weeklyCookingSummaryString,
                 nextWeekFocusString
             );
 
-            if (!notificationContent) {
+            if (!aiGeneratedNotificationContent?.title || !aiGeneratedNotificationContent?.body) {
                 logger.warn(`AI content generation failed for ${notificationType} for user ${userDoc.id}. Falling back to default content.`);
-                notificationContent = { ...config.defaultContent };
-                // Slightly personalize default content if possible
-                if (userContext.displayName) {
-                    notificationContent.title = notificationContent.title.replace("Your", `${userContext.displayName}\'s`);
+                aiGeneratedNotificationContent = { ...config.defaultContent };
+                if (userContext.displayName && aiGeneratedNotificationContent.title) {
+                    aiGeneratedNotificationContent.title = aiGeneratedNotificationContent.title.replace("Your", `${userContext.displayName}\'s`);
                 }
             }
 
-            // Send Notification
-            const deepLink = config.defaultDeepLinkBase || "saucey://home"; // Default deep link
+            const dynamicData = {
+                deepLinkOverride: config.defaultDeepLinkBase || "saucey://home",
+                suggestionStrategy: "weeklyRecap" // Add a strategy for logging/analytics if needed
+            };
+
+            logger.info(`Dispatching ${notificationType} for user ${userDoc.id}`, { userId: userDoc.id, dynamicData });
             await dispatchNotification(
                 userDoc.id,
                 notificationType,
-                { deepLinkOverride: deepLink }, // dynamicData
-                notificationContent // This is { title, body, emoji }
+                dynamicData, 
+                aiGeneratedNotificationContent 
             );
-            logger.info(`Successfully processed and sent ${notificationType} for user ${userDoc.id}`);
-
-        } // End of user loop
-
+        }
         logger.log(`Finished processing ${notificationType}.`);
-
     } catch (error) {
         logger.error(`Error in ${notificationType} scheduled function:`, error);
     }
