@@ -1,15 +1,15 @@
 // saucey-cloud-functions/feedbackFunctions/feedbackService.js
 
 // Gen 2 specific import for scheduled functions
-const { onSchedule } = require("firebase-functions/v2/scheduler"); // For scheduled functions
-const { logger } = require("firebase-functions"); // Use the v2 logger
-const admin = require("firebase-admin");
-const nodemailer = require("nodemailer");
+const { onSchedule } = require('firebase-functions/v2/scheduler'); // For scheduled functions
+const { logger } = require('firebase-functions'); // Use the v2 logger
+const admin = require('firebase-admin');
+const nodemailer = require('nodemailer');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 const { generateContent: generateGeminiContent } = require('@saucey/shared/services/geminiClient.js'); // Assuming HarmCategory, HarmBlockThreshold are not directly used here or handled within generateGeminiContent
-const feedbackConfig = require("./config"); // feedbackConfig.js content will be used here
+const feedbackConfig = require('./config'); // feedbackConfig.js content will be used here
 const firestoreHelper = require('@saucey/shared/services/firestoreHelper');
-const { FieldValue, Timestamp } = firestoreHelper; // Assuming Timestamp is correctly from firestoreHelper
+const { Timestamp } = firestoreHelper; // Assuming Timestamp is correctly from firestoreHelper
 
 const secretManagerClient = new SecretManagerServiceClient();
 
@@ -23,50 +23,50 @@ let mailTransport;
 
 // Nodemailer initialization (no change needed in this function itself)
 async function initializeNodemailer() {
-    if (mailTransport) return;
+  if (mailTransport) return;
 
-    const gmailEmail = feedbackConfig.GMAIL_SENDER_EMAIL;
-    const recipientEmail = feedbackConfig.FEEDBACK_RECIPIENT_EMAIL;
+  const gmailEmail = feedbackConfig.GMAIL_SENDER_EMAIL;
+  const recipientEmail = feedbackConfig.FEEDBACK_RECIPIENT_EMAIL;
 
-    if (!gmailEmail) {
-        logger.error("Gmail sending email (GMAIL_SENDER_EMAIL env var) is not set. Email sending will be disabled.");
-        return;
-    }
-    if (!recipientEmail) {
-        logger.warn("Recipient email (FEEDBACK_RECIPIENT_EMAIL env var) is not set or using default.");
-    }
+  if (!gmailEmail) {
+    logger.error('Gmail sending email (GMAIL_SENDER_EMAIL env var) is not set. Email sending will be disabled.');
+    return;
+  }
+  if (!recipientEmail) {
+    logger.warn('Recipient email (FEEDBACK_RECIPIENT_EMAIL env var) is not set or using default.');
+  }
 
-    let gmailPassword;
-    try {
-        // Standardize project ID fetching - Prefer environment variable, then config, then fallback.
-        const projectID = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || feedbackConfig.PROJECT_ID || 'saucey-3fb0f';
-        if (!projectID) {
-            throw new Error("Google Cloud Project ID not found in environment variables or config.");
-        }
-        const secretName = `projects/${projectID}/secrets/${feedbackConfig.GMAIL_APP_PASSWORD_SECRET_ID}/versions/${feedbackConfig.GMAIL_APP_PASSWORD_SECRET_VERSION}`;
-        const [version] = await secretManagerClient.accessSecretVersion({ name: secretName });
-        gmailPassword = version.payload.data.toString('utf8');
-        if (!gmailPassword) {
-            throw new Error('Fetched Gmail App Password from Secret Manager is empty.');
-        }
-        logger.info("Successfully fetched Gmail App Password from Secret Manager for feedback service.");
-    } catch (error) {
-        logger.error("CRITICAL: Failed to fetch Gmail App Password from Secret Manager for feedback service:", { errorMessage: error.message, stack: error.stack });
-        return; // Stop if password fetch fails
+  let gmailPassword;
+  try {
+    // Standardize project ID fetching - Prefer environment variable, then config, then fallback.
+    const projectID = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || feedbackConfig.PROJECT_ID || 'saucey-3fb0f';
+    if (!projectID) {
+      throw new Error('Google Cloud Project ID not found in environment variables or config.');
     }
+    const secretName = `projects/${projectID}/secrets/${feedbackConfig.GMAIL_APP_PASSWORD_SECRET_ID}/versions/${feedbackConfig.GMAIL_APP_PASSWORD_SECRET_VERSION}`;
+    const [version] = await secretManagerClient.accessSecretVersion({ name: secretName });
+    gmailPassword = version.payload.data.toString('utf8');
+    if (!gmailPassword) {
+      throw new Error('Fetched Gmail App Password from Secret Manager is empty.');
+    }
+    logger.info('Successfully fetched Gmail App Password from Secret Manager for feedback service.');
+  } catch (error) {
+    logger.error('CRITICAL: Failed to fetch Gmail App Password from Secret Manager for feedback service:', { errorMessage: error.message, stack: error.stack });
+    return; // Stop if password fetch fails
+  }
 
-    if (gmailPassword) {
-        mailTransport = nodemailer.createTransport({
-            service: "gmail",
-            auth: {
-                user: gmailEmail,
-                pass: gmailPassword,
-            },
-        });
-        logger.info("Nodemailer transport configured using password from Secret Manager.");
-    } else {
-        logger.error("Gmail password was not available. Email sending disabled.");
-    }
+  if (gmailPassword) {
+    mailTransport = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: gmailEmail,
+        pass: gmailPassword,
+      },
+    });
+    logger.info('Nodemailer transport configured using password from Secret Manager.');
+  } else {
+    logger.error('Gmail password was not available. Email sending disabled.');
+  }
 }
 
 const nodemailerInitializationPromise = initializeNodemailer();
@@ -75,7 +75,7 @@ const nodemailerInitializationPromise = initializeNodemailer();
 // LLM Summary function (no change needed in this function itself)
 async function getLlmSummary(feedbackEntries) {
   if (feedbackEntries.length === 0) {
-    return "No new feedback to summarize in the monitored period.";
+    return 'No new feedback to summarize in the monitored period.';
   }
   // ... (rest of your getLlmSummary function, ensure logger calls are updated to logger.log, logger.error etc.)
   // Make sure to use logger.log, logger.warn, logger.error from firebase-functions/v2
@@ -98,19 +98,19 @@ async function getLlmSummary(feedbackEntries) {
     Feedback entries:
     ${feedbackEntries.map((entry, index) => `
       Entry ${index + 1}:
-      User: ${entry.username || entry.userId || "Anonymous"} (Email: ${entry.email || "N/A"})
-      Type: ${entry.feedbackType || "N/A"}
-      Affected Feature: ${entry.affectedFeature || "N/A"}
-      Description: ${entry.description || "N/A"}
-      App Version: ${entry.appVersion || "N/A"} (Build: ${entry.buildNumber || "N/A"})
-      Device: ${entry.deviceModel || "N/A"}, OS: ${entry.osVersion || "N/A"}
-      Screenshots: ${entry.screenshotURLs && entry.screenshotURLs.length > 0 ? `${entry.screenshotURLs.length} attached` : "None"}
-      Date: ${entry.timestamp && entry.timestamp.toDate ? entry.timestamp.toDate().toLocaleDateString() : "N/A"}
-      Status: ${entry.status || "N/A"}
-    `).join("\n---------------------------------------------------\n")}
+      User: ${entry.username || entry.userId || 'Anonymous'} (Email: ${entry.email || 'N/A'})
+      Type: ${entry.feedbackType || 'N/A'}
+      Affected Feature: ${entry.affectedFeature || 'N/A'}
+      Description: ${entry.description || 'N/A'}
+      App Version: ${entry.appVersion || 'N/A'} (Build: ${entry.buildNumber || 'N/A'})
+      Device: ${entry.deviceModel || 'N/A'}, OS: ${entry.osVersion || 'N/A'}
+      Screenshots: ${entry.screenshotURLs && entry.screenshotURLs.length > 0 ? `${entry.screenshotURLs.length} attached` : 'None'}
+      Date: ${entry.timestamp && entry.timestamp.toDate ? entry.timestamp.toDate().toLocaleDateString() : 'N/A'}
+      Status: ${entry.status || 'N/A'}
+    `).join('\n---------------------------------------------------\n')}
   `;
 
-  logger.info("Sending prompt for feedback summary via shared Gemini client (first 500 chars):", { promptStart: promptText.substring(0, 500) + "..." });
+  logger.info('Sending prompt for feedback summary via shared Gemini client (first 500 chars):', { promptStart: promptText.substring(0, 500) + '...' });
 
   try {
     const generationConfig = {
@@ -121,23 +121,23 @@ async function getLlmSummary(feedbackEntries) {
     };
 
     const response = await generateGeminiContent({
-        modelName: feedbackConfig.GEMINI_MODEL_NAME_FOR_SUMMARY,
-        contents: [{ role: "user", parts: [{ text: promptText }] }],
-        generationConfig,
+      modelName: feedbackConfig.GEMINI_MODEL_NAME_FOR_SUMMARY,
+      contents: [{ role: 'user', parts: [{ text: promptText }] }],
+      generationConfig,
     });
     
     // Assuming response.text() is the correct way to get text from your shared geminiClient
     // If generateGeminiContent returns a structure like { text: () => "summary" }
     const summaryText = typeof response.text === 'function' ? response.text() : response; 
 
-    logger.info("Gemini feedback summary received via shared client (first 200 chars):", { summaryStart: String(summaryText).substring(0, 200) + "..." });
+    logger.info('Gemini feedback summary received via shared client (first 200 chars):', { summaryStart: String(summaryText).substring(0, 200) + '...' });
     return String(summaryText);
 
   } catch (error) {
-    logger.error("Error calling shared Gemini client for feedback summary:", { errorMessage: error.message, stack: error.stack });
-    let errorMessageText = "Error generating summary from LLM via shared client.";
-     if (error.message && error.message.toLowerCase().includes("safety")) {
-        errorMessageText = `Request or generated response for feedback summary was blocked due to safety settings. Details: ${error.message}`;
+    logger.error('Error calling shared Gemini client for feedback summary:', { errorMessage: error.message, stack: error.stack });
+    let errorMessageText = 'Error generating summary from LLM via shared client.';
+    if (error.message && error.message.toLowerCase().includes('safety')) {
+      errorMessageText = `Request or generated response for feedback summary was blocked due to safety settings. Details: ${error.message}`;
     } else if (error.message) {
       errorMessageText += ` Details: ${error.message}`;
     }
@@ -151,28 +151,28 @@ async function getLlmSummary(feedbackEntries) {
 exports.summarizeAndReportFeedbackV2 = onSchedule(
   {
     schedule: feedbackConfig.FEEDBACK_SUMMARY_SCHEDULE, // From your config.js
-    timeZone: "America/Los_Angeles",
+    timeZone: 'America/Los_Angeles',
     // Runtime options for Gen 2:
     cpu: 1, // Specify CPU (e.g., 1, 2, 4). Default is 1 for Gen 2. Can also be "gcf_gen1" to mimic Gen1 CPU behavior
-    memory: "512MiB", // Specify memory (e.g., "256MiB", "512MiB", "1GiB", "2GiB")
+    memory: '512MiB', // Specify memory (e.g., "256MiB", "512MiB", "1GiB", "2GiB")
     timeoutSeconds: 300, // Max 540 for scheduled functions
     // region: "us-central1", // Optional: specify region if needed
     // secrets: [feedbackConfig.GMAIL_APP_PASSWORD_SECRET_ID], // If you manage secrets this way for v2
   },
   async (event) => { // event argument is standard for v2 scheduled functions
     await nodemailerInitializationPromise;
-    logger.log("Running summarizeAndReportFeedbackV2 (Gen 2) function. Event ID:", event.id);
+    logger.log('Running summarizeAndReportFeedbackV2 (Gen 2) function. Event ID:', event.id);
 
     const recipientEmail = feedbackConfig.FEEDBACK_RECIPIENT_EMAIL;
     const gmailEmail = feedbackConfig.GMAIL_SENDER_EMAIL;
 
     if (!mailTransport) {
-        logger.error("Nodemailer transport not configured. Cannot send email.");
-        return; // Using return instead of return null for clarity
+      logger.error('Nodemailer transport not configured. Cannot send email.');
+      return; // Using return instead of return null for clarity
     }
     if (!recipientEmail || !gmailEmail) {
-        logger.error("Sender or Recipient email not configured. Cannot send email.");
-        return;
+      logger.error('Sender or Recipient email not configured. Cannot send email.');
+      return;
     }
 
     const periodDays = feedbackConfig.FEEDBACK_SUMMARY_PERIOD_DAYS;
@@ -189,7 +189,7 @@ exports.summarizeAndReportFeedbackV2 = onSchedule(
       };
       feedbackItems = await firestoreHelper.getCollection(feedbackConfig.FEEDBACK_COLLECTION_NAME, queryOptions);
       
-      const reportDate = new Date().toLocaleDateString("en-US", { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      const reportDate = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
       const projectID = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || feedbackConfig.PROJECT_ID || 'saucey-3fb0f'; // [!] feedbackConfig.js defines PROJECT_ID
       const subject = `Saucey App - Feedback Report (${periodDays}-day period ending ${reportDate})`;
 
@@ -197,11 +197,11 @@ exports.summarizeAndReportFeedbackV2 = onSchedule(
       if (feedbackItems.length === 0) {
         logger.log(`No feedback submissions in the last ${periodDays} days.`);
         const mailOptions = {
-            from: `"Saucey App Feedback" <${gmailEmail}>`,
-            to: recipientEmail,
-            subject: subject,
-            text: `No new feedback was submitted in the Saucey app during the past ${periodDays} days.`,
-            html: `<p>No new feedback was submitted in the Saucey app during the past ${periodDays} days (for period ending ${reportDate}).</p>`,
+          from: `"Saucey App Feedback" <${gmailEmail}>`,
+          to: recipientEmail,
+          subject: subject,
+          text: `No new feedback was submitted in the Saucey app during the past ${periodDays} days.`,
+          html: `<p>No new feedback was submitted in the Saucey app during the past ${periodDays} days (for period ending ${reportDate}).</p>`,
         };
         await mailTransport.sendMail(mailOptions);
         logger.log(`Empty feedback report email sent for ${periodDays}-day period.`);
@@ -230,20 +230,20 @@ exports.summarizeAndReportFeedbackV2 = onSchedule(
         `,
       };
       await mailTransport.sendMail(mailOptions);
-      logger.log("Feedback summary email sent to:", recipientEmail);
+      logger.log('Feedback summary email sent to:', recipientEmail);
 
     } catch (error) {
-      logger.error("Error in summarizeAndReportFeedbackV2 function:", error.message, error.stack);
+      logger.error('Error in summarizeAndReportFeedbackV2 function:', error.message, error.stack);
       if (mailTransport) {
         try {
           await mailTransport.sendMail({
             from: `"Saucey App Feedback ERROR" <${gmailEmail}>`,
             to: recipientEmail,
             subject: `URGENT: Saucey App - Feedback Report FAILED (${new Date().toLocaleDateString()})`,
-            text: `The feedback summary function (V2) encountered an error: ${error instanceof Error ? error.message : String(error)} \n\nStack: ${error instanceof Error ? error.stack : "N/A"}`,
+            text: `The feedback summary function (V2) encountered an error: ${error instanceof Error ? error.message : String(error)} \n\nStack: ${error instanceof Error ? error.stack : 'N/A'}`,
           });
         } catch (emailError) {
-          logger.error("Error sending failure email:", emailError);
+          logger.error('Error sending failure email:', emailError);
         }
       }
     }
@@ -254,16 +254,16 @@ exports.summarizeAndReportFeedbackV2 = onSchedule(
 exports.cleanupOldFeedbackV2 = onSchedule(
   {
     schedule: feedbackConfig.FEEDBACK_CLEANUP_SCHEDULE, // From your config.js
-    timeZone: "America/Los_Angeles",
+    timeZone: 'America/Los_Angeles',
     // Runtime options for Gen 2:
     cpu: 1, 
-    memory: "256MiB", // Usually cleanup doesn't need much memory
+    memory: '256MiB', // Usually cleanup doesn't need much memory
     timeoutSeconds: 540, // Max 540 for scheduled functions
     // region: "us-central1", // Optional: specify region if needed
   },
   async (event) => {
     await nodemailerInitializationPromise; // For error reporting
-    logger.log("Running cleanupOldFeedbackV2 (Gen 2) function. Event ID:", event.id);
+    logger.log('Running cleanupOldFeedbackV2 (Gen 2) function. Event ID:', event.id);
 
     const retentionDays = feedbackConfig.FEEDBACK_RETENTION_DAYS;
     const cutoffDate = new Date();
@@ -277,11 +277,11 @@ exports.cleanupOldFeedbackV2 = onSchedule(
     try {
       await firestoreHelper.ensureFirestoreInitialized();
       const feedbackCollectionRef = db.collection(feedbackConfig.FEEDBACK_COLLECTION_NAME);
-      const query = feedbackCollectionRef.where("timestamp", "<", cutoffTimestamp);
+      const query = feedbackCollectionRef.where('timestamp', '<', cutoffTimestamp);
 
       const snapshot = await query.get();
       if (snapshot.empty) {
-        logger.log("No old feedback found to delete.");
+        logger.log('No old feedback found to delete.');
         return;
       }
 
@@ -305,17 +305,17 @@ exports.cleanupOldFeedbackV2 = onSchedule(
       logger.log(`Successfully deleted ${snapshot.size} old feedback documents.`);
 
     } catch (error) {
-      logger.error("Error in cleanupOldFeedbackV2 function:", error.message, error.stack);
+      logger.error('Error in cleanupOldFeedbackV2 function:', error.message, error.stack);
       if (mailTransport && recipientEmail && gmailEmail) {
         try {
           await mailTransport.sendMail({
             from: `"Saucey App System ERROR" <${gmailEmail}>`,
             to: recipientEmail,
-            subject: "URGENT: Saucey App - Old Feedback Cleanup FAILED (V2)",
+            subject: 'URGENT: Saucey App - Old Feedback Cleanup FAILED (V2)',
             text: `The cleanupOldFeedback function (V2) encountered an error: ${error.message}\n\nStack: ${error.stack}`,
           });
         } catch (emailError) {
-          logger.error("Error sending cleanup failure email:", emailError);
+          logger.error('Error sending cleanup failure email:', emailError);
         }
       }
     }
