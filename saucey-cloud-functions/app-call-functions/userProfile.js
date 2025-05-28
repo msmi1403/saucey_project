@@ -10,8 +10,7 @@ const db = admin.firestore();
 const { formatRecipeSummary } = require('../utils/recipeFormatters'); // Adjusted path
 
 // --- Constants for profile data fetching ---
-const CREATOR_PROFILE_FEATURED_LIMIT = 10; // Max featured on profile
-const CREATOR_PROFILE_ALL_PUBLIC_LIMIT = 20;
+const DEFAULT_ITEMS_PER_CREATOR_CATEGORY = 7; // Default if definition doesn't specify itemCount
 
 /**
  * Calculates the average rating of all public recipes created by the authenticated user.
@@ -78,11 +77,11 @@ const getCreatorProfileData = onCall(async (request) => {
     const logPrefix = "getCreatorProfileData:"; // Standardized prefix
 
     if (!profileOwnerId || typeof profileOwnerId !== "string") {
-        logger.error(`${logPrefix} Missing or invalid 'profileOwnerId'.`, { profileOwnerId }); // Changed to logger
+        logger.error(`${logPrefix} Missing or invalid 'profileOwnerId'.`, { profileOwnerId });
         throw new HttpsError("invalid-argument", "Valid 'profileOwnerId' is required.");
     }
 
-    logger.info(`${logPrefix} Function started for profileOwnerId: ${profileOwnerId}, called by: ${callerUid || 'Anon'}.`); // Changed to logger
+    logger.info(`${logPrefix} Function started for profileOwnerId: ${profileOwnerId}, called by: ${callerUid || 'Anon'}.`);
 
     try {
         // --- 1. Fetch User Profile Info ---
@@ -92,48 +91,125 @@ const getCreatorProfileData = onCall(async (request) => {
         let userProfileData = null;
         if (userProfileSnap.exists) {
             userProfileData = userProfileSnap.data();
-            userProfileData.userId = userProfileSnap.id; // Ensure userId is part of the profile data
-            userProfileData.username = userProfileData.username || "User"; // Default username if missing
-            // Add any other transformations or default values needed by the client
+            userProfileData.userId = userProfileSnap.id; 
+            userProfileData.username = userProfileData.username || "User"; 
         } else {
-            logger.info(`${logPrefix} User profile not found for ${profileOwnerId}.`); // Changed to logger
+            logger.info(`${logPrefix} User profile not found for ${profileOwnerId}.`);
         }
 
-        // --- 2. Fetch Public Recipes by this Creator ---
-        const publicRecipesRef = db.collection("public_recipes");
-        const creatorRecipesQuery = publicRecipesRef
-            .where("createdByUserId", "==", profileOwnerId)
-            .where("isPublic", "==", true)
-            .orderBy("createdAt", "desc") 
-            .limit(CREATOR_PROFILE_ALL_PUBLIC_LIMIT);
-
-        const creatorRecipesSnapshot = await creatorRecipesQuery.get();
-        const publicRecipes = [];
-        creatorRecipesSnapshot.forEach((doc) => {
-            const summary = formatRecipeSummary(doc.data(), doc.id);
-            if (summary) {
-                publicRecipes.push(summary);
-            }
-        });
-
-        // --- 3. Construct Recipe Categories ---
+        // --- 2. Fetch Creator-Specific Category Definitions ---
         const recipeCategories = [];
-        if (publicRecipes.length > 0) {
-            const featuredRecipes = publicRecipes.slice(0, CREATOR_PROFILE_FEATURED_LIMIT);
-            if (featuredRecipes.length > 0) {
-                recipeCategories.push({
-                    title: "Featured Recipes",
-                    recipes: featuredRecipes,
-                    // type: "featured" // Example if client needs a type identifier
+        const categoryDefinitionSource = [];
+        const definitionsSnapshot = await db
+            .collection("leaderboard_definitions")
+            .where("profileContext", "==", "creator") // Filter for creator profile categories
+            .orderBy("displayOrder")
+            .get();
+
+        definitionsSnapshot.forEach((doc) => {
+            categoryDefinitionSource.push({
+                id: doc.id,
+                ...doc.data(),
+                limit: doc.data().itemCount || DEFAULT_ITEMS_PER_CREATOR_CATEGORY,
+            });
+        });
+        
+        if (categoryDefinitionSource.length === 0) {
+            logger.info(`${logPrefix} No creator-specific category definitions found for ${profileOwnerId}.`);
+            // Optionally, could fall back to a default "All Public Recipes" category here if desired
+        }
+
+        // --- 3. Fetch Recipes for Each Defined Category ---
+        for (const def of categoryDefinitionSource) {
+            let recipes = [];
+            let query;
+            const fetchLimit = def.limit || DEFAULT_ITEMS_PER_CREATOR_CATEGORY;
+            const defTypeLog = `Def: "${def.title}" (Type: ${def.type}, Limit: ${fetchLimit}) for User: ${profileOwnerId}`;
+            logger.info(`${logPrefix} Processing ${defTypeLog}.`);
+
+            // Base query for this creator's public recipes
+            let baseQuery = db.collection("public_recipes")
+                .where("isPublic", "==", true)
+                .where("createdByUserId", "==", profileOwnerId);
+
+            switch (def.type) {
+                case "creatorTagBased": // Recipes by this creator matching specific tags
+                    if (def.filterTags && Array.isArray(def.filterTags) && def.filterTags.length > 0) {
+                        const tagsToQuery = def.filterTags.slice(0, 10);
+                        query = baseQuery
+                            .where("tags", "array-contains-any", tagsToQuery)
+                            .orderBy(def.sortField || "saveCount", "desc")
+                            .orderBy("createdAt", "desc") // Secondary sort
+                            .limit(fetchLimit);
+                    } else {
+                        logger.warn(`${logPrefix} creatorTagBased category "${def.title}" is missing 'filterTags'.`);
+                    }
+                    break;
+                case "creatorOverallSort": // All recipes by this creator, sorted by a field (e.g. saveCount, createdAt)
+                    query = baseQuery
+                        .orderBy(def.sortField || "saveCount", "desc")
+                        .orderBy("createdAt", "desc") // Ensure consistent secondary sort
+                        .limit(fetchLimit);
+                    break;
+                // Add more creator-specific types as needed
+                default:
+                    logger.warn(`${logPrefix} Unknown creator category definition type: "${def.type}" for "${def.title}". Skipping.`);
+                    break;
+            }
+
+            if (query) {
+                const snapshot = await query.get();
+                snapshot.forEach((doc) => {
+                    const summary = formatRecipeSummary(doc.data(), doc.id);
+                    if (summary) recipes.push(summary);
                 });
             }
 
-            const creatorUsername = userProfileData ? userProfileData.username : "this chef";
-            recipeCategories.push({
-                title: `All Public Recipes by ${creatorUsername}`,
-                recipes: publicRecipes, 
-                // type: "all_public_by_creator"
+            if (recipes.length > 0) {
+                // Modify title if needed, e.g., prepend creator's name or keep as defined.
+                // For now, using the title from the definition.
+                // let categoryTitle = def.title;
+                // if (userProfileData && userProfileData.username) {
+                //     categoryTitle = `${userProfileData.username}'s ${def.title}`;
+                // }
+                
+                recipeCategories.push({
+                    id: def.id, // Use definition ID
+                    title: def.title, // Use title from definition
+                    recipes: recipes,
+                    canLoadMore: recipes.length === fetchLimit, 
+                });
+            } else {
+                logger.info(`${logPrefix} No recipes found for category "${def.title}" by user ${profileOwnerId}.`);
+            }
+        }
+        
+        // Fallback: If no dynamic categories were populated and user has recipes, add an "All Public Recipes"
+        // This part is optional, depending on desired behavior if no definitions match.
+        if (recipeCategories.length === 0) {
+            logger.info(`${logPrefix} No dynamic categories populated. Checking for general public recipes for ${profileOwnerId}.`);
+            const allPublicQuery = db.collection("public_recipes")
+                .where("isPublic", "==", true)
+                .where("createdByUserId", "==", profileOwnerId)
+                .orderBy("createdAt", "desc")
+                .limit(DEFAULT_ITEMS_PER_CREATOR_CATEGORY); // Or a different limit for this fallback
+
+            const allPublicSnapshot = await allPublicQuery.get();
+            const publicRecipes = [];
+            allPublicSnapshot.forEach(doc => {
+                const summary = formatRecipeSummary(doc.data(), doc.id);
+                if (summary) publicRecipes.push(summary);
             });
+
+            if (publicRecipes.length > 0) {
+                const creatorUsername = userProfileData ? userProfileData.username : "This Chef";
+                recipeCategories.push({
+                    id: `creator_all_public_${profileOwnerId}`, // A generic ID for this fallback category
+                    title: `All Public Recipes by ${creatorUsername}`,
+                    recipes: publicRecipes,
+                    canLoadMore: publicRecipes.length === DEFAULT_ITEMS_PER_CREATOR_CATEGORY,
+                });
+            }
         }
 
         // --- 4. Return Combined Data ---

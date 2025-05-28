@@ -12,7 +12,14 @@ const createDefaultChapters = functions.auth.user().onCreate(async (userRecord) 
   const logPrefix = `createDefaultChapters[User:${userId}]:`;
 
   console.log(`${logPrefix} Creating default chapters for new user.`);
-  const defaultChapters = ["Breakfast", "Lunch", "Dinner", "Desserts"];
+  const defaultChapterDetails = {
+    name: "Favorites",
+    iconName: "icon_pasta",
+    colorHex: "#FF2D55",
+    description: "Your most loved recipes.",
+    recipeCount: 0,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
 
   const batch = db.batch();
   const chaptersCollectionRef = db
@@ -20,15 +27,10 @@ const createDefaultChapters = functions.auth.user().onCreate(async (userRecord) 
     .doc(userId)
     .collection("chapters");
 
-  defaultChapters.forEach((chapterName) => {
-    const newChapterRef = chaptersCollectionRef.doc(); // Firestore auto-generates ID
-    batch.set(newChapterRef, {
-      name: chapterName,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(), // Good practice to add a timestamp
-      recipeCount: 0, // Initialize recipe count
-    });
-    console.log(`${logPrefix}  - Added '${chapterName}' to batch.`);
-  });
+  // Create only the "Favorites" chapter with details
+  const newChapterRef = chaptersCollectionRef.doc(); // Firestore auto-generates ID
+  batch.set(newChapterRef, defaultChapterDetails);
+  console.log(`${logPrefix}  - Added '${defaultChapterDetails.name}' chapter with details to batch.`);
 
   try {
     await batch.commit();

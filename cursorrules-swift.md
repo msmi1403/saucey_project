@@ -8,6 +8,7 @@
     -   Keep functions and methods short and focused on a single responsibility (SRP - Single Responsibility Principle).
     -   Avoid deeply nested `if/else` statements or loops. Consider using `guard` statements for early exits, or refactoring into smaller functions.
     -   Use Swift's type inference where it improves readability, but explicitly state types if it adds clarity, especially in public APIs or complex expressions.
+    - do not add previews structures to files.
 -   **Swift API Design Guidelines**:
     -   Follow Swift API Design Guidelines (e.g., naming conventions, fluency of use).
     -   Strive for clarity at the point of use.

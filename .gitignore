@@ -78,3 +78,6 @@ env/
 
 # macOS
 .DS_Store
+
+# Local Firebase rules file
+firestore.rules.local
