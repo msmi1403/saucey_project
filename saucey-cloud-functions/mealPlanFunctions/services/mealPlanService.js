@@ -1046,4 +1046,3 @@ Ensure all quantities and times are numbers. The 'ingredients' array should cont
     throw new HttpsError("internal", "An unexpected error occurred while generating the full recipe.");
   }
 });
-``` 
