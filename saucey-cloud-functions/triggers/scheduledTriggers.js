@@ -1,7 +1,6 @@
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
-const functions = require("firebase-functions"); // For logger
-const { logger } = functions;
+const { logger } = require("firebase-functions/v2"); // Use Gen 2 logger
 
 // Admin SDK should be initialized in root index.js
 const db = admin.firestore();

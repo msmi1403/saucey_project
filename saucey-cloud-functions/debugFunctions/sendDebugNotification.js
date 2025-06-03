@@ -1,7 +1,7 @@
 // saucey-cloud-functions/debugFunctions/sendDebugNotification.js
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
-const { logger } = require("firebase-functions"); // logger can still be from v1 or use console.log for v2
+const { logger } = require("firebase-functions/v2");// logger can still be from v1 or use console.log for v2
 
 // Firebase Admin SDK should be initialized in the root index.js
 // if (admin.apps.length === 0) {

@@ -2,7 +2,7 @@
 
 // Gen 2 specific import for scheduled functions
 const { onSchedule } = require('firebase-functions/v2/scheduler'); // For scheduled functions
-const { logger } = require('firebase-functions'); // Use the v2 logger
+const { logger } = require('firebase-functions/v2'); // Use the v2 logger
 const admin = require('firebase-admin');
 const nodemailer = require('nodemailer');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');

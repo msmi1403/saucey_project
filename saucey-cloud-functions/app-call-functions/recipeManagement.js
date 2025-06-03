@@ -1,7 +1,6 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
-const functions = require("firebase-functions"); // Added for logger
-const { logger } = functions; // Added for logger
+const { logger } = require("firebase-functions/v2"); // Use Gen 2 logger
 // Assuming admin is initialized in a shared file, e.g., ../shared/firebaseAdmin.js
 // If not, you might need:
 // admin.initializeApp(); 

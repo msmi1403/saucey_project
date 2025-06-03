@@ -35,6 +35,12 @@ const RECIPES_SUBCOLLECTION = process.env.RECIPES_SUBCOLLECTION || 'my_recipes';
 const MAX_IMAGE_UPLOAD_SIZE_BYTES = parseInt(process.env.MAX_IMAGE_UPLOAD_SIZE_BYTES, 10) || 10 * 1024 * 1024; // 10MB limit
 const URL_FETCH_TIMEOUT_MS = parseInt(process.env.URL_FETCH_TIMEOUT_MS, 10) || 15000; // 15 seconds
 
+// --- Function Runtime Options (Gen 2) ---
+const REGION = process.env.FUNCTION_REGION || globalConfig.LOCATION || 'us-central1'; // Default to global location or us-central1
+const MEMORY = process.env.FUNCTION_MEMORY || '1GiB'; // Default memory for this function
+const TIMEOUT_SECONDS = parseInt(process.env.FUNCTION_TIMEOUT_SECONDS, 10) || 300; // Default timeout
+const MIN_INSTANCES = parseInt(process.env.FUNCTION_MIN_INSTANCES, 10) || 0; // Default min instances
+
 // --- Supported Types (Specific to handleRecipeChatTurn) ---
 const SUPPORTED_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
 
@@ -76,6 +82,12 @@ module.exports = {
   DETAILED_RECIPE_JSON_SCHEMA_PROMPT,
   CHEF_PERSONALITY_PROMPTS,
   RECIPE_SYSTEM_PROMPT_JSON,
+
+  // Runtime options for Gen 2 functions
+  REGION,
+  MEMORY,
+  TIMEOUT_SECONDS,
+  MIN_INSTANCES,
 
   // Note: PROJECT_ID, LOCATION, and CORS_HEADERS (if defined in globalConfig)
   // are available because of the ...globalConfig spread.

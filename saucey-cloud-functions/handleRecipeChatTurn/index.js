@@ -1,7 +1,7 @@
 // /handleRecipeChatTurn/index.js
 
-const firebaseFunctions = require('firebase-functions');
-const { logger } = firebaseFunctions;
+const { logger } = require("firebase-functions/v2");
+const { onRequest } = require("firebase-functions/v2/https"); // Gen 2 HTTP import
 const config = require('./config');
 const { authenticateFirebaseToken } = require('@saucey/shared/middleware/authMiddleware.js');
 
@@ -230,6 +230,14 @@ const handleRecipeChatTurnLogic = async (req, res) => {
 // exports.handleRecipeChat = onRequest(handleRecipeChatTurnLogic);
 // For now, I will keep the export as is, assuming root index.js handles the Firebase wrapper.
 
-module.exports = {
-  handleRecipeChat: handleRecipeChatTurnLogic
-};
+// Gen 2 Export Style
+exports.handleRecipeChat = onRequest(
+    {
+        region: config.REGION, // Example, ensure these are in your config.js
+        memory: config.MEMORY, // Example
+        timeoutSeconds: config.TIMEOUT_SECONDS, // Example
+        minInstances: config.MIN_INSTANCES, // Example
+        // secrets: [config.GEMINI_API_KEY_SECRET_ID], // If using secrets directly in v2 options
+    },
+    handleRecipeChatTurnLogic
+);

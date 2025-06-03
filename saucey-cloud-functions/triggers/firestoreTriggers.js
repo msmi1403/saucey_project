@@ -1,7 +1,6 @@
 const { onDocumentWritten } = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
-const functions = require("firebase-functions"); // For logger, if needed, or use v2 logger
-const { logger } = functions; // Using v1 logger for now for consistency if other v1 fns are moved
+const { logger } = require("firebase-functions/v2"); // Corrected: Use Gen 2 logger
 const Typesense = require("typesense"); // Required for Typesense.Client
 
 // Admin SDK should be initialized in root index.js

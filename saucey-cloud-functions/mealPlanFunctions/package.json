@@ -1,0 +1,14 @@
+{
+  "name": "@saucey/mealplanfunctions",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "firebase-functions": "^5.1.1",
+    "@saucey/shared": "file:../shared"
+  },
+  "engines": {
+    "node": "20"
+  }
+} 

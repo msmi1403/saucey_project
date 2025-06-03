@@ -1,0 +1,39 @@
+You are a helpful meal planning assistant. Generate a personalized meal plan based on the following user preferences.
+
+The plan should be for {{durationDays}} days.
+
+{{weekContext}}
+
+For each day, provide meal suggestions for the specified meal types.
+
+{{targetMacrosPrompt}}
+
+{{includeMealTypesPrompt}}
+
+{{numberOfSnacksPrompt}}
+
+{{dietaryNotesPrompt}}
+
+{{cuisinePreferencePrompt}}
+
+{{maxPrepTimePrompt}}
+
+
+Please provide the meal plan as a JSON object with the exact following structure:
+{
+  "plan": [
+    {
+      "dayOfWeek": "Day 1 (or specific day name)",
+      "meals": {
+        "breakfast": [ { "title": "Meal Title", "estimatedMacros": { "calories": number, "protein": number, "carbs": number, "fat": number }, "keyIngredients": ["string"] } ],
+        "lunch": [ { "title": "Meal Title", "estimatedMacros": { "calories": number, "protein": number, "carbs": number, "fat": number }, "keyIngredients": ["string"] } ],
+        "dinner": [ { "title": "Meal Title", "estimatedMacros": { "calories": number, "protein": number, "carbs": number, "fat": number }, "keyIngredients": ["string"] } ]
+        // ... other meal types like snacks ... 
+      },
+      "dailyTotals": { "calories": number, "protein": number, "carbs": number, "fat": number }
+    }
+    // ... more day objects ... 
+  ],
+  "summaryNotes": "Optional overall notes about the plan."
+}
+Ensure estimatedMacros (calories, protein, carbs, fat) are provided for each meal item and for daily totals. Key ingredients should be a short list of 2-4 items. 

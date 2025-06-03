@@ -1,6 +1,6 @@
 // saucey-cloud-functions/notifications/aiLogic/notificationGenerator.js
 const geminiClientModule = require("@saucey/shared/services/geminiClient");
-const { logger } = require("firebase-functions");
+const { logger } = require("firebase-functions/v2");
 const { notificationConfigs } = require("../config/notificationConfig");
 // Import necessary constants from globalConfig
 const {

@@ -1,8 +1,7 @@
 const admin = require("firebase-admin");
 const { onRequest } = require("firebase-functions/v2/https");
 const cors = require("cors")({ origin: true }); // Configure CORS as needed
-const functions = require("firebase-functions");
-const { logger } = functions;
+const { logger } = require("firebase-functions/v2"); // Use Gen 2 logger
 
 // Admin SDK initialized in root index.js
 const db = admin.firestore();

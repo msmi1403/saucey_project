@@ -21,6 +21,8 @@
     "axios": "^1.6.0",
     "busboy": "^1.6.0",
     "cheerio": "^1.0.0-rc.12",
+    "dom-serializer": "^1.4.1",
+    "domelementtype": "^2.3.0",
     "firebase-admin": "^12.0.0",
     "uuid": "^9.0.0"
   },

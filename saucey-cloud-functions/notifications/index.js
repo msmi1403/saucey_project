@@ -1,35 +1,22 @@
-// saucey-cloud-functions/notifications/index.js
-const admin = require("firebase-admin");
-const functions = require("firebase-functions");
-
-// Initialize Firebase Admin SDK if not already initialized (idempotent)
-// It's good practice to have this at the entry point of your functions modules
-// if (admin.apps.length === 0) {
-//   admin.initializeApp();
-// }
-// The root index.js should handle initialization.
+// CORRECTED: saucey-cloud-functions/notifications/index.js
 
 const scheduledFunctions = require("./triggers/scheduledNotifications");
 const firestoreTriggers = require("./triggers/firestoreTriggers");
-// If you add HTTP triggers later:
-// const httpTriggers = require("./triggers/httpTriggers");
-
-// Import the new dispatcher
 const { dispatchNotification } = require("./services/sendNotification");
 
-// Export utility/service functions directly if they are meant to be called by other functions/triggers
+// Directly export each function that should be deployable
+// or callable from other services.
+
+// Utility/Service functions (if meant to be called by other modules directly, though less common for triggers)
 exports.dispatchNotification = dispatchNotification;
 
-// Export all functions from this module
-exports.notifications = {
-    // Scheduled Functions
-    sendWeeklyRecipeSuggestions: scheduledFunctions.sendWeeklyRecipeSuggestions,
-    sendMealPlanReminders: scheduledFunctions.sendMealPlanReminders,
-    sendWeeklyRecapNotifications: scheduledFunctions.sendWeeklyRecapNotifications,
+// Scheduled Functions
+exports.sendWeeklyRecipeSuggestions = scheduledFunctions.sendWeeklyRecipeSuggestions;
+exports.sendMealPlanReminders = scheduledFunctions.sendMealPlanReminders;
+exports.sendWeeklyRecapNotifications = scheduledFunctions.sendWeeklyRecapNotifications;
 
-    // Firestore Triggers
-    notifyFollowersOnNewRecipe: firestoreTriggers.notifyFollowersOnNewRecipe,
+// Firestore Triggers
+exports.notifyFollowersOnNewRecipe = firestoreTriggers.notifyFollowersOnNewRecipe;
 
-    // HTTP Triggers (Example, if you add them)
-    // sendTestNotification: httpTriggers.sendTestNotification,
-};
+// If you add HTTP Triggers later, they would be exported here too:
+// exports.someHttpTrigger = require("./triggers/httpTriggers").someHttpTrigger;

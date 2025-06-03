@@ -1,48 +1,51 @@
-const functions = require("firebase-functions"); // Reverting to v1 for auth triggers
-const admin = require("firebase-admin");
+// triggers/authTriggers.js
+const functions = require("firebase-functions");   // v6.x (still installed in package.json)
+const admin     = require("firebase-admin");
 
-// Admin SDK should be initialized in root index.js, so we can just get db instance
 const db = admin.firestore();
 
 /**
- * Auth Trigger: onCreate - Creates default cookbook chapters for a new user.
+ * HTTPS Endpoint: createDefaultChapters
+ * Expects a POST payload { uid: "<newUserUid>" }.
+ * Call this from your client immediately after you complete sign-up.
  */
-const createDefaultChapters = functions.auth.user().onCreate(async (userRecord) => {
-  const userId = userRecord.uid;
-  const logPrefix = `createDefaultChapters[User:${userId}]:`;
+exports.createDefaultChapters = functions.https.onRequest(async (req, res) => {
+  // Only allow POST
+  if (req.method !== "POST") {
+    res.status(405).send("Method Not Allowed");
+    return;
+  }
 
-  console.log(`${logPrefix} Creating default chapters for new user.`);
-  const defaultChapterDetails = {
-    name: "Favorites",
-    iconName: "icon_pasta",
-    colorHex: "#FF2D55",
+  const uid = req.body.uid;
+  if (typeof uid !== "string" || !uid.match(/^.{20,}$/)) {
+    res.status(400).send("Invalid or missing UID");
+    return;
+  }
+
+  const logPrefix = `createDefaultChapters[User:${uid}]`;
+
+  functions.logger.log(`${logPrefix}: received request.`);
+
+  const defaultChapter = {
+    name:        "Favorites",
+    iconName:    "icon_pasta",
+    colorHex:    "#FF2D55",
     description: "Your most loved recipes.",
     recipeCount: 0,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt:   admin.firestore.FieldValue.serverTimestamp(),
   };
 
-  const batch = db.batch();
-  const chaptersCollectionRef = db
-    .collection("users")
-    .doc(userId)
-    .collection("chapters");
-
-  // Create only the "Favorites" chapter with details
-  const newChapterRef = chaptersCollectionRef.doc(); // Firestore auto-generates ID
-  batch.set(newChapterRef, defaultChapterDetails);
-  console.log(`${logPrefix}  - Added '${defaultChapterDetails.name}' chapter with details to batch.`);
-
   try {
-    await batch.commit();
-    console.log(`${logPrefix} Successfully created default chapters.`);
-    return null;
-  } catch (error) {
-    console.error(`${logPrefix} Error creating default chapters:`, error);
-    // Optionally, re-throw or handle more gracefully depending on desired error propagation
-    return null; // Default behavior from original function
+    const chaptersRef = db
+      .collection("users")
+      .doc(uid)
+      .collection("chapters");
+
+    await chaptersRef.doc().set(defaultChapter);
+    functions.logger.log(`${logPrefix}: successfully created default chapter.`);
+    res.status(200).send({ success: true });
+  } catch (err) {
+    functions.logger.error(`${logPrefix}: error creating chapter:`, err);
+    res.status(500).send({ error: err.message });
   }
 });
-
-module.exports = {
-  createDefaultChapters,
-}; 

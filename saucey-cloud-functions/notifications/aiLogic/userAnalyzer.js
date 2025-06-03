@@ -1,6 +1,6 @@
 // saucey-cloud-functions/notifications/aiLogic/userAnalyzer.js
 const firestoreHelper = require("@saucey/shared/services/firestoreHelper");
-const { logger } = require("firebase-functions");
+const { logger } = require("firebase-functions/v2");
 
 /**
  * Analyzes user activity and preferences to create context for notifications.
@@ -27,7 +27,7 @@ async function analyzeUserActivityAndPrefs(userId, userData = null) {
             displayName: userDoc.displayName || "Foodie",
             preferences: {
                 preferredRecipeDifficulty: userDoc.preferredRecipeDifficulty,
-                preferredMaxCookTime: userDoc.preferredMaxCookTime,
+                preferredCookTimePreference: userDoc.preferredCookTimePreference,
                 selectedDietaryFilters: userDoc.selectedDietaryFilters,
                 customDietaryNotes: userDoc.customDietaryNotes,
                 preferredChefPersonality: userDoc.preferredChefPersonality || "Helpful Chef",
@@ -40,6 +40,8 @@ async function analyzeUserActivityAndPrefs(userId, userData = null) {
             },
             // Add more fields as needed, e.g., engagement metrics
             lastActiveDate: userDoc.lastLoginDate || userDoc.createdAt,
+            isProUser: userDoc.isProUser || false,
+            proSubscriptionExpiryDate: userDoc.proSubscriptionExpiryDate,
         };
 
         // --- Placeholder for fetching more detailed activity ---
