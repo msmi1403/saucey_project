@@ -44,8 +44,16 @@ const generateMealPlan = functions.onCall({ timeoutSeconds: 300 }, async (reques
   }
 
   // Parse start date or default to today
-  const planStartDate = startDate ? new Date(startDate) : new Date();
+  let planStartDate = startDate ? new Date(startDate) : new Date();
   planStartDate.setHours(0, 0, 0, 0); // Normalize to start of day
+  
+  // Ensure start date is not in the past (use tomorrow if today is requested)
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (planStartDate <= today) {
+    planStartDate = new Date(today);
+    planStartDate.setDate(today.getDate() + 1); // Start tomorrow
+  }
   
   // Calculate week-aligned start date (always Sunday)
   const weekAlignedStartDate = getWeekAlignedStartDate(planStartDate);
@@ -281,13 +289,15 @@ function buildCookbookContext(cookbookRecipes) {
 function buildConstraintsContext(preferences) {
   const constraints = [];
 
-  // Meal types
+  // Meal types - be very explicit
   const mealTypes = [];
   if (preferences.includeBreakfast) mealTypes.push('breakfast');
   if (preferences.includeLunch) mealTypes.push('lunch');  
   if (preferences.includeDinner) mealTypes.push('dinner');
   if (mealTypes.length > 0) {
-    constraints.push(`Meal Types: ${mealTypes.join(', ')}`);
+    constraints.push(`REQUIRED MEAL TYPES ONLY: ${mealTypes.join(', ')} - Do NOT include any other meal types`);
+  } else {
+    constraints.push('REQUIRED MEAL TYPES ONLY: None specified - Generate no meals');
   }
 
   // Target macros
@@ -442,7 +452,10 @@ function transformAiResponseToMealPlan(aiResponse, preferences, startDate, userI
  */
 function getWeekAlignedStartDate(date) {
   const weekdayOfDate = date.getDay(); // 0 = Sunday, 1 = Monday, etc.
-  const daysToSubtract = weekdayOfDate;
+  
+  // If it's already Sunday (0), don't subtract any days
+  // Otherwise, find the most recent Sunday
+  const daysToSubtract = weekdayOfDate === 0 ? 0 : weekdayOfDate;
   
   const weekAlignedDate = new Date(date);
   weekAlignedDate.setDate(date.getDate() - daysToSubtract);
