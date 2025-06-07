@@ -52,6 +52,12 @@
  */
 
 /**
+ * @typedef {object} MealPlanPreferences
+ * @property {string[]} [availableCookingDays] - List of days when user can cook (e.g., ["Monday", "Friday"]).
+ * @property {string} [recipeSourcePriority] - User's preference for recipe sources ("cookbookOnly", "balancedMix", "discoverNew").
+ */
+
+/**
  * @typedef {object} GenerateAiMealPlanParams
  * @property {number} durationDays - Number of days for the meal plan.
  * @property {TargetMacrosInput} [targetMacros] - Optional target macronutrients.
@@ -68,6 +74,9 @@
  * @property {string} [cookingExperience] - Optional user cooking experience (e.g., "beginner", "intermediate", "advanced").
  * @property {string[]} [availableKitchenTools] - Optional list of available kitchen tools.
  * @property {string} [prepVolume] - Optional preference for meal prep volume (e.g., "single_servings", "batch_cooking").
+ * @property {MealPlanPreferences} [preferences] - Optional meal plan preferences object.
+ * @property {number} [chunkIndex] - The 0-based index of the chunk to generate.
+ * @property {string} [planStartDate] - ISO8601 date string for the plan start date.
  */
 
 /**

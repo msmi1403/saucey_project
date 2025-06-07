@@ -18,6 +18,7 @@ Follow the exact day-by-day instructions specified above. Generate meal suggesti
 
 {{maxPrepTimePrompt}}
 
+{{personalizationPrompt}}
 
 Please provide the meal plan as a JSON object with the exact following structure:
 {

@@ -4,6 +4,9 @@ const { HttpsError } = require("firebase-functions/v2/https");
 const geminiClient = require("@saucey/shared/services/geminiClient");
 const globalConfig = require("@saucey/shared/config/globalConfig");
 const { validateGenerateAiMealPlanChunkParams } = require("../utils/validationHelper");
+const { UserPreferenceAnalyzer } = require("../services/userPreferenceAnalyzer");
+const { CookbookRecipeSelector } = require("../services/cookbookRecipeSelector");
+const { MealVarietyTracker } = require("../services/mealVarietyTracker");
 const fs = require('fs');
 const path = require('path');
 
@@ -34,6 +37,11 @@ const aiPlanGenerator = functions.onCall({ timeoutSeconds: 300 }, async (request
   }
   const userId = request.auth.uid;
 
+  // Initialize services
+  const userPreferenceAnalyzer = new UserPreferenceAnalyzer();
+  const cookbookRecipeSelector = new CookbookRecipeSelector();
+  const mealVarietyTracker = new MealVarietyTracker();
+
   let { params } = request.data;
 
   if (!params || typeof params !== 'object') {
@@ -55,6 +63,38 @@ const aiPlanGenerator = functions.onCall({ timeoutSeconds: 300 }, async (request
   const dayOffset = chunkIndex * FIXED_DURATION_DAYS_PER_CHUNK;
 
   logger.info(`aiPlanGenerator (chunk mode): Generating chunk ${chunkIndex}/${FIXED_TOTAL_CHUNKS_FOR_CONTEXT -1} (${FIXED_DURATION_DAYS_PER_CHUNK} days, starting global day ${dayOffset + 1}).`, { userId });
+
+  // PHASE 1: Generate User Preference Profile
+  logger.info(`aiPlanGenerator: Generating user preference profile for ${userId}`);
+  const userProfile = await userPreferenceAnalyzer.generateUserPreferenceProfile(userId);
+  
+  // PHASE 2: Get Recent Meals for Variety Tracking
+  logger.info(`aiPlanGenerator: Fetching recent meals for variety tracking`);
+  const recentMeals = await mealVarietyTracker.getRecentlyUsedRecipes(userId, 4);
+  
+  // PHASE 3: Calculate Recipe Distribution
+  const recipeSourcePriority = params.preferences?.recipeSourcePriority || 'balancedMix';
+  const totalMealSlots = calculateTotalMealSlots(params);
+  const { cookbookCount, aiCount } = cookbookRecipeSelector.calculateRecipeDistribution(recipeSourcePriority, totalMealSlots);
+  
+  logger.info(`aiPlanGenerator: Recipe distribution - ${cookbookCount} cookbook, ${aiCount} AI recipes`);
+  
+  // PHASE 4: Select Optimal Cookbook Recipes
+  const mealContext = {
+    targetMacros: params.targetMacros,
+    mealTypes: params.mealTypesToInclude,
+    maxCookTime: params.maxPrepTimePerMealMinutes,
+    cuisinePreference: params.cuisinePreference
+  };
+  
+  const recentRecipeIds = recentMeals.map(meal => meal.recipeId).filter(Boolean);
+  const selectedCookbookRecipes = await cookbookRecipeSelector.selectOptimalCookbookRecipes(
+    userId, 
+    cookbookCount, 
+    userProfile, 
+    mealContext, 
+    recentRecipeIds
+  );
 
     let fullPrompt = fs.readFileSync(path.join(__dirname, '../prompts/aiPlanGenerator.prompt.txt'), 'utf8');
     
@@ -210,6 +250,30 @@ ${Array.from({length: 7}, (_, idx) => {
       maxPrepTimePrompt = `Aim for a maximum prep time of ${params.maxPrepTimePerMealMinutes} minutes per meal.`;
     }
     fullPrompt = fullPrompt.replace('{{maxPrepTimePrompt}}', maxPrepTimePrompt);
+    
+    // PHASE 5: Add Personalization Context to Prompt
+    let personalizationPrompt = "";
+    if (userProfile.dataQuality.hasGoodData) {
+      const userContext = userPreferenceAnalyzer.formatProfileForPrompt(userProfile);
+      personalizationPrompt = `USER PREFERENCES: ${userContext}`;
+    }
+    
+    // Add variety guidance
+    const varietyContext = mealVarietyTracker.generateVarietyContextForPrompt(recentMeals);
+    if (varietyContext) {
+      personalizationPrompt += ` ${varietyContext}`;
+    }
+    
+    // Add selected cookbook recipes
+    const cookbookContext = cookbookRecipeSelector.formatSelectedRecipesForPrompt(selectedCookbookRecipes);
+    if (selectedCookbookRecipes.length > 0) {
+      personalizationPrompt += ` COOKBOOK INTEGRATION: ${cookbookContext} Please incorporate some of these cookbook recipes appropriately into the meal plan.`;
+    }
+    
+    // Recipe source guidance
+    personalizationPrompt += ` RECIPE SOURCE PRIORITY: User prefers "${recipeSourcePriority}" (${cookbookCount} cookbook + ${aiCount} new AI recipes for this week).`;
+    
+    fullPrompt = fullPrompt.replace('{{personalizationPrompt}}', personalizationPrompt);
     fullPrompt = fullPrompt.split('\n').filter(line => line.trim() !== '').join('\n');
 
   logger.info(`aiPlanGenerator (chunk mode): Constructed prompt for chunk ${chunkIndex} (days ${dayOffset + 1}-${dayOffset + FIXED_DURATION_DAYS_PER_CHUNK})`, { userId, promptLength: fullPrompt.length, weekContext: weekContextPrompt });
@@ -318,6 +382,36 @@ function shouldGenerateMealsForDate(date, cookingDays, planStartDate, vacationDa
   
   // Generate meals if: cooking day AND future/today AND not vacation
   return isCookingDay && isCurrentDateInFuture && !isVacationDay;
+}
+
+// Helper function to calculate total meal slots needed
+function calculateTotalMealSlots(params) {
+  const mealTypes = params.mealTypesToInclude || ['breakfast', 'lunch', 'dinner'];
+  const cookingDays = params.preferences?.availableCookingDays || ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  
+  // Calculate how many days this week will have meals
+  let activeDays = 0;
+  if (params.planStartDate && cookingDays.length > 0) {
+    const planStartDate = new Date(params.planStartDate);
+    const weekAlignedStartDate = getWeekAlignedStartDate(planStartDate);
+    const chunkStartDate = new Date(weekAlignedStartDate);
+    chunkStartDate.setDate(weekAlignedStartDate.getDate() + (params.chunkIndex * 7));
+    
+    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+      const currentDayDate = new Date(chunkStartDate);
+      currentDayDate.setDate(chunkStartDate.getDate() + dayIndex);
+      
+      if (shouldGenerateMealsForDate(currentDayDate, cookingDays, planStartDate)) {
+        activeDays++;
+      }
+    }
+  } else {
+    activeDays = 7; // Fallback
+  }
+  
+  const totalSlots = activeDays * mealTypes.length;
+  logger.info(`calculateTotalMealSlots: ${activeDays} active days × ${mealTypes.length} meal types = ${totalSlots} total slots`);
+  return totalSlots;
 }
 
 module.exports = { aiPlanGenerator }; 
