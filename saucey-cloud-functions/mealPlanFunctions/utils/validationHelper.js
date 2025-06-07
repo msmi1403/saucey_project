@@ -30,14 +30,14 @@ function validateBaseMealPlanParams(params, errors) {
     }
   }
   
-  // Example for includeMealTypes (if provided)
-  if (params.includeMealTypes !== undefined) {
-    if (!Array.isArray(params.includeMealTypes)) {
-     errors.push("'includeMealTypes' must be an array if provided.");
+  // Example for mealTypesToInclude (if provided)
+  if (params.mealTypesToInclude !== undefined) {
+    if (!Array.isArray(params.mealTypesToInclude)) {
+     errors.push("'mealTypesToInclude' must be an array if provided.");
     } else {
-        params.includeMealTypes.forEach((type, index) => { // Added index for better error reporting
+        params.mealTypesToInclude.forEach((type, index) => { // Added index for better error reporting
             if (typeof type !== 'string' || type.trim() === "") { // Check for empty strings too
-                errors.push(`Meal type at index ${index} in 'includeMealTypes' must be a non-empty string.`);
+                errors.push(`Meal type at index ${index} in 'mealTypesToInclude' must be a non-empty string.`);
             }
         });
     }
@@ -89,10 +89,11 @@ function validateGenerateAiMealPlanParams(params) {
 
 /**
  * Validates the parameters for AI meal plan generation (chunked).
- * @param {object} params - The parameters to validate, including chunkIndex and totalChunks.
+ * @param {object} params - The parameters to validate, including chunkIndex.
+ * @param {number} fixedTotalChunks - The server-defined total number of chunks for context.
  * @returns {{isValid: boolean, errors: string[]}} Validation result.
  */
-function validateGenerateAiMealPlanChunkParams(params) {
+function validateGenerateAiMealPlanChunkParams(params, fixedTotalChunks) {
   const errors = [];
   if (!params) {
     errors.push("Request params for chunked generation are missing.");
@@ -103,16 +104,9 @@ function validateGenerateAiMealPlanChunkParams(params) {
     errors.push("Parameter 'chunkIndex' must be a non-negative integer.");
   }
 
-  if (typeof params.totalChunks !== 'number' || params.totalChunks <= 0 || !Number.isInteger(params.totalChunks)) {
-    errors.push("Parameter 'totalChunks' must be a positive integer.");
-  }
-
-  if (typeof params.chunkIndex === 'number' && typeof params.totalChunks === 'number' && params.chunkIndex >= params.totalChunks) {
-    errors.push("'chunkIndex' must be less than 'totalChunks'.");
-  }
-  
-  if (params.durationDaysPerChunk !== undefined && (typeof params.durationDaysPerChunk !== 'number' || params.durationDaysPerChunk <= 0 || !Number.isInteger(params.durationDaysPerChunk))) {
-    errors.push("Optional parameter 'durationDaysPerChunk' must be a positive integer if provided.");
+  // Validate chunkIndex against the server-defined fixed total
+  if (typeof params.chunkIndex === 'number' && params.chunkIndex >= fixedTotalChunks) {
+    errors.push(`Parameter 'chunkIndex' (${params.chunkIndex}) must be less than server-defined total chunks (${fixedTotalChunks}).`);
   }
 
   validateBaseMealPlanParams(params, errors); // Call refactored base validation

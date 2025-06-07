@@ -42,7 +42,7 @@ const updateMealPlanPreferences_v2 = onCall(
         // Enforce server-side defaults and remove disallowed fields
         const preferencesToSave = {
             ...preferences,
-            planDurationWeeks: 12, // Enforce 12 weeks
+            planDurationWeeks: 5, // Enforce 5 weeks
             updatedAtServerTimestamp: admin.firestore.FieldValue.serverTimestamp()
         };
 

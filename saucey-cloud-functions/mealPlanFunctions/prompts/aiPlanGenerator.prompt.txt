@@ -4,7 +4,7 @@ The plan should be for {{durationDays}} days.
 
 {{weekContext}}
 
-For each day, provide meal suggestions for the specified meal types.
+Follow the exact day-by-day instructions specified above. Generate meal suggestions for the specified meal types only on the days indicated.
 
 {{targetMacrosPrompt}}
 
@@ -23,16 +23,17 @@ Please provide the meal plan as a JSON object with the exact following structure
 {
   "plan": [
     {
-      "dayOfWeek": "Day 1 (or specific day name)",
+      "dayOfWeek": "Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday",
       "meals": {
+        // For days with meals: include meal objects
         "breakfast": [ { "title": "Meal Title", "estimatedMacros": { "calories": number, "protein": number, "carbs": number, "fat": number }, "keyIngredients": ["string"] } ],
         "lunch": [ { "title": "Meal Title", "estimatedMacros": { "calories": number, "protein": number, "carbs": number, "fat": number }, "keyIngredients": ["string"] } ],
         "dinner": [ { "title": "Meal Title", "estimatedMacros": { "calories": number, "protein": number, "carbs": number, "fat": number }, "keyIngredients": ["string"] } ]
-        // ... other meal types like snacks ... 
+        // For days without meals: use empty object: "meals": {}
       },
       "dailyTotals": { "calories": number, "protein": number, "carbs": number, "fat": number }
     }
-    // ... more day objects ... 
+    // ... more day objects for all 7 days of week ... 
   ],
   "summaryNotes": "Optional overall notes about the plan."
 }

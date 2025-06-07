@@ -20,6 +20,7 @@ const { planGroceryLister } = require("../handlers/planGroceryLister.handler");
 const { promoteStubToFullRecipe } = require("../handlers/promoteStubToFullRecipe.handler");
 const { adaptRecipeStubForMacros } = require("../handlers/adaptRecipeStubForMacros.handler");
 const { updateMealPlanPreferences_v2 } = require("../handlers/updateMealPlanPreferences_v2.handler"); // Added
+const { extendMealPlan } = require("../handlers/extendMealPlan.handler"); // Added for rolling meal plans
 
 // Export all functions
 exports.fetchMealPlanPreferences = fetchMealPlanPreferences;
@@ -31,6 +32,7 @@ exports.planGroceryLister = planGroceryLister;
 exports.promoteStubToFullRecipe = promoteStubToFullRecipe;
 exports.adaptRecipeStubForMacros = adaptRecipeStubForMacros;
 exports.updateMealPlanPreferences_v2 = updateMealPlanPreferences_v2; // Added
+exports.extendMealPlan = extendMealPlan; // Added for rolling meal plans
 
 logger.info("mealPlanService.js: All meal plan function handlers loaded and exported.");
 

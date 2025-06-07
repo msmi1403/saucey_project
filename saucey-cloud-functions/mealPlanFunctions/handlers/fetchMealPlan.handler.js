@@ -40,8 +40,31 @@ const fetchMealPlan = functions.onCall(async (request) => {
       return { plan: null };
     }
 
-    logger.info("fetchMealPlan: Plan fetched successfully from handler.", { userId, planId });
-    return { plan: mealPlanData }; 
+    // Create a mutable copy to avoid modifying the cached version if firestoreHelper returns one
+    const mutablePlanData = { ...mealPlanData };
+
+    // Convert Firestore Timestamps to ISO strings if they exist
+    if (mutablePlanData.createdAt && typeof mutablePlanData.createdAt.toDate === 'function') {
+      mutablePlanData.createdAt = mutablePlanData.createdAt.toDate().toISOString();
+      logger.info("fetchMealPlan: Converted 'createdAt' to ISO string.", { userId, planId });
+    }
+    if (mutablePlanData.updatedAt && typeof mutablePlanData.updatedAt.toDate === 'function') {
+      mutablePlanData.updatedAt = mutablePlanData.updatedAt.toDate().toISOString();
+      logger.info("fetchMealPlan: Converted 'updatedAt' to ISO string.", { userId, planId });
+    }
+    // Also check startDate and endDate, just in case they were ever stored as Timestamps, though model expects string.
+    // This is more for robustness if data sources were inconsistent.
+    if (mutablePlanData.startDate && typeof mutablePlanData.startDate.toDate === 'function') {
+      mutablePlanData.startDate = mutablePlanData.startDate.toDate().toISOString();
+       logger.info("fetchMealPlan: Converted 'startDate' to ISO string (was unexpectedly a Timestamp).", { userId, planId });
+    }
+    if (mutablePlanData.endDate && typeof mutablePlanData.endDate.toDate === 'function') {
+      mutablePlanData.endDate = mutablePlanData.endDate.toDate().toISOString();
+      logger.info("fetchMealPlan: Converted 'endDate' to ISO string (was unexpectedly a Timestamp).", { userId, planId });
+    }
+
+    logger.info("fetchMealPlan: Plan fetched and timestamps converted successfully from handler.", { userId, planId });
+    return { plan: mutablePlanData }; 
 
   } catch (error) {
     logger.error("fetchMealPlan: Error fetching plan from Firestore in handler.", {
