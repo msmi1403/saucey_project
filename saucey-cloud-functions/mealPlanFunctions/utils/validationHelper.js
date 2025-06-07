@@ -101,9 +101,9 @@ function validateGenerateAiMealPlanChunkParams(params, maxTotalChunks) {
     errors.push('chunkIndex must be a non-negative number.');
   }
 
-  if (typeof params.durationDays !== 'number' || params.durationDays <= 0) {
-    errors.push('durationDays must be a positive number.');
-  }
+  // REMOVED: durationDays validation - this is handled by the handler automatically
+  // The handler sets FIXED_DURATION_DAYS_PER_CHUNK = 7 for chunks
+  // iOS app doesn't need to send durationDays for chunk-based generation
 
   // Optional parameters validation
   if (params.targetMacros && typeof params.targetMacros !== 'object') {
@@ -122,6 +122,12 @@ function validateGenerateAiMealPlanChunkParams(params, maxTotalChunks) {
     errors.push('maxPrepTimePerMealMinutes must be a positive number.');
   }
 
+  // Map iOS maxTimePerMealMinutes to maxPrepTimePerMealMinutes if needed
+  if (params.maxTimePerMealMinutes && !params.maxPrepTimePerMealMinutes) {
+    params.maxPrepTimePerMealMinutes = params.maxTimePerMealMinutes;
+    delete params.maxTimePerMealMinutes; // Clean up the old key
+  }
+
   if (params.dietaryNotes && typeof params.dietaryNotes !== 'string') {
     errors.push('dietaryNotes must be a string.');
   }
@@ -135,9 +141,22 @@ function validateGenerateAiMealPlanChunkParams(params, maxTotalChunks) {
     if (typeof params.preferences !== 'object') {
       errors.push('preferences must be an object.');
     } else {
-      // Validate recipeSourcePriority
+      // Validate recipeSourcePriority - ENHANCED WITH DISPLAY NAME MAPPING
       if (params.preferences.recipeSourcePriority) {
         const validSourcePriorities = ['cookbookOnly', 'balancedMix', 'discoverNew'];
+        
+        // Map display names to enum values
+        const displayNameMapping = {
+          'Cookbook Only': 'cookbookOnly',
+          'Balanced Mix': 'balancedMix', 
+          'Prioritize New Recipes': 'discoverNew'
+        };
+        
+        // Auto-convert display names to enum values
+        if (displayNameMapping[params.preferences.recipeSourcePriority]) {
+          params.preferences.recipeSourcePriority = displayNameMapping[params.preferences.recipeSourcePriority];
+        }
+        
         if (!validSourcePriorities.includes(params.preferences.recipeSourcePriority)) {
           errors.push(`recipeSourcePriority must be one of: ${validSourcePriorities.join(', ')}`);
         }
@@ -153,6 +172,78 @@ function validateGenerateAiMealPlanChunkParams(params, maxTotalChunks) {
           if (invalidDays.length > 0) {
             errors.push(`availableCookingDays contains invalid days: ${invalidDays.join(', ')}`);
           }
+        }
+      }
+
+      // Validate cookTimePreference - ADD DISPLAY NAME MAPPING
+      if (params.preferences.cookTimePreference) {
+        const validCookTimes = ['any', 'sixtyMinutes', 'thirtyMinutes', 'fifteenMinutes'];
+        
+        // Map display names to enum values for cookTimePreference
+        const cookTimeMapping = {
+          "Doesn't Matter": 'any',
+          '< 60 min': 'sixtyMinutes',
+          '< 30 min': 'thirtyMinutes', 
+          '< 15 min': 'fifteenMinutes'
+        };
+        
+        // Auto-convert display names to enum values
+        if (cookTimeMapping[params.preferences.cookTimePreference]) {
+          params.preferences.cookTimePreference = cookTimeMapping[params.preferences.cookTimePreference];
+        }
+      }
+
+      // Validate prepVolume - ADD DISPLAY NAME MAPPING  
+      if (params.preferences.prepVolume) {
+        const validPrepVolumes = ['daily', 'lightPrep', 'mediumPrep', 'batchPrep'];
+        
+        // Map display names to enum values for prepVolume
+        const prepVolumeMapping = {
+          '1-2 days': 'daily',
+          '2-3 Days': 'lightPrep',
+          '3-4 Days': 'mediumPrep',
+          '5-7 Days': 'batchPrep'
+        };
+        
+        // Auto-convert display names to enum values
+        if (prepVolumeMapping[params.preferences.prepVolume]) {
+          params.preferences.prepVolume = prepVolumeMapping[params.preferences.prepVolume];
+        }
+      }
+
+      // Validate activityLevel - ADD DISPLAY NAME MAPPING
+      if (params.preferences.activityLevel) {
+        const validActivityLevels = ['sedentary', 'lightlyActive', 'moderatelyActive', 'veryActive', 'extremelyActive'];
+        
+        // Map display names to enum values for activityLevel
+        const activityLevelMapping = {
+          'Sedentary': 'sedentary',
+          'Lightly Active': 'lightlyActive',
+          'Moderately Active': 'moderatelyActive',
+          'Very Active': 'veryActive',
+          'Extremely Active': 'extremelyActive'
+        };
+        
+        // Auto-convert display names to enum values
+        if (activityLevelMapping[params.preferences.activityLevel]) {
+          params.preferences.activityLevel = activityLevelMapping[params.preferences.activityLevel];
+        }
+      }
+
+      // Validate cookingExperience - ADD DISPLAY NAME MAPPING
+      if (params.preferences.cookingExperience) {
+        const validCookingExperience = ['beginner', 'intermediate', 'advanced'];
+        
+        // Map display names to enum values for cookingExperience
+        const cookingExperienceMapping = {
+          'Beginner': 'beginner',
+          'Intermediate': 'intermediate', 
+          'Advanced': 'advanced'
+        };
+        
+        // Auto-convert display names to enum values
+        if (cookingExperienceMapping[params.preferences.cookingExperience]) {
+          params.preferences.cookingExperience = cookingExperienceMapping[params.preferences.cookingExperience];
         }
       }
     }

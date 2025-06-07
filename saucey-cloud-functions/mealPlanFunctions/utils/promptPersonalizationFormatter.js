@@ -117,41 +117,41 @@ class PromptPersonalizationFormatter {
     }
 
     /**
-     * Formats variety guidance compactly
-     * @param {object} varietyGuidance - Variety tracking data
-     * @returns {string} Formatted variety guidance
+     * Formats variety guidance into compact prompt format
+     * @param {object} varietyGuidance - Variety guidance data
+     * @returns {string} Compact variety guidance prompt
      */
     formatVarietyGuidance(varietyGuidance) {
-        if (!varietyGuidance || Object.keys(varietyGuidance).length === 0) {
-            return '';
+        const parts = [];
+
+        // Add explicit exclusions as HARD CONSTRAINTS - NEW AGGRESSIVE APPROACH
+        if (varietyGuidance.explicitExclusions && varietyGuidance.explicitExclusions.length > 0) {
+            const exclusions = varietyGuidance.explicitExclusions.slice(0, 8); // Limit to prevent token bloat
+            parts.push(`AVOID_EXACTLY:[${exclusions.join(', ')}]`);
         }
 
-        const guidance = [];
-
-        // Recent variety scores
-        if (varietyGuidance.recentCuisines?.length > 0) {
-            const recentCuisines = varietyGuidance.recentCuisines
-                .slice(0, 4)
-                .join(',');
-            guidance.push(`recent_cuisines:[${recentCuisines}]`);
+        // Existing guidance but made more directive
+        if (varietyGuidance.recentProteins && varietyGuidance.recentProteins.length > 0) {
+            parts.push(`RECENT_PROTEINS:[${varietyGuidance.recentProteins.join(', ')}]`);
         }
 
-        if (varietyGuidance.recentProteins?.length > 0) {
-            const recentProteins = varietyGuidance.recentProteins
-                .slice(0, 3)
-                .join(',');
-            guidance.push(`recent_proteins:[${recentProteins}]`);
+        if (varietyGuidance.recentCuisines && varietyGuidance.recentCuisines.length > 0) {
+            parts.push(`RECENT_CUISINES:[${varietyGuidance.recentCuisines.join(', ')}]`);
         }
 
-        // Variety recommendations
-        if (varietyGuidance.recommendedCuisines?.length > 0) {
-            const recommended = varietyGuidance.recommendedCuisines
-                .slice(0, 3)
-                .join(',');
-            guidance.push(`try:[${recommended}]`);
+        if (varietyGuidance.recommendedProteins && varietyGuidance.recommendedProteins.length > 0) {
+            parts.push(`PRIORITIZE_PROTEINS:[${varietyGuidance.recommendedProteins.join(', ')}]`);
         }
 
-        return guidance.length > 0 ? `VARIETY:{${guidance.join(' ')}}` : '';
+        if (varietyGuidance.recommendedCuisines && varietyGuidance.recommendedCuisines.length > 0) {
+            parts.push(`PRIORITIZE_CUISINES:[${varietyGuidance.recommendedCuisines.join(', ')}]`);
+        }
+
+        if (varietyGuidance.diversityScore !== undefined) {
+            parts.push(`DIVERSITY_SCORE:${varietyGuidance.diversityScore}`);
+        }
+
+        return parts.join(' ');
     }
 
     /**

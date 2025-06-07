@@ -12,13 +12,13 @@ class MealVarietyTracker {
         // How many weeks back to check for variety
         this.varietyWindowWeeks = 4;
         
-        // Weights for different similarity factors
+        // Weights for different similarity factors - MADE MORE AGGRESSIVE
         this.similarityWeights = {
-            exactTitleMatch: 0.9,
-            proteinMatch: 0.6,
-            cuisineMatch: 0.4,
-            mainIngredientMatch: 0.5,
-            cookingMethodMatch: 0.3
+            exactTitleMatch: 1.0,        // Increased from 0.9 - exact matches get maximum penalty
+            proteinMatch: 0.7,           // Increased from 0.6 
+            cuisineMatch: 0.5,           // Increased from 0.4
+            mainIngredientMatch: 0.6,    // Increased from 0.5
+            cookingMethodMatch: 0.4      // Increased from 0.3
         };
     }
 
@@ -35,8 +35,9 @@ class MealVarietyTracker {
 
             logger.info(`MealVarietyTracker: Fetching recent recipes for user ${userId} from ${cutoffDate.toISOString()}`);
 
-            // Fetch recent meal plans
-            const recentMealPlans = await firestoreHelper.getCollection(`users/${userId}/meal_plans`, {
+            // FIXED: Use correct collection path - mealPlans (no underscore) 
+            // This matches the path used in fetchMealPlan.handler.js and saveMealPlan operations
+            const recentMealPlans = await firestoreHelper.getCollection(`users/${userId}/mealPlans`, {
                 where: [{ field: "createdAt", operator: ">=", value: cutoffDate }],
                 orderBy: [{ field: "createdAt", direction: "desc" }],
                 limit: 10 // Limit to recent plans
@@ -82,33 +83,100 @@ class MealVarietyTracker {
 
     /**
      * Calculates variety score for a proposed meal against recent meals
+     * WITH SMART COOKBOOK-ONLY FALLBACK for limited recipe collections
      * @param {object} proposedMeal - The meal being considered
      * @param {Array} recentMeals - Recently used meals
+     * @param {object} context - Additional context for smart fallbacks
      * @returns {number} Variety score (0-10, higher = more variety)
      */
-    calculateVarietyScore(proposedMeal, recentMeals) {
+    calculateVarietyScore(proposedMeal, recentMeals, context = {}) {
         if (recentMeals.length === 0) {
             return 10; // Maximum variety if no recent meals
         }
 
-        let totalSimilarity = 0;
-        let weightedComparisons = 0;
-
+        let maxSimilarity = 0; // Use MAX similarity instead of average
+        
         recentMeals.forEach((recentMeal, index) => {
-            // Weight recent meals more heavily (exponential decay)
-            const recencyWeight = Math.exp(-0.1 * index);
+            // Weight recent meals MUCH more heavily - MADE MORE AGGRESSIVE
+            const recencyWeight = Math.exp(-0.05 * index); // Changed from -0.1 to -0.05 (slower decay = stronger penalty)
             
             const similarity = this.calculateMealSimilarity(proposedMeal, recentMeal);
-            totalSimilarity += similarity * recencyWeight;
-            weightedComparisons += recencyWeight;
+            
+            // Apply exponential penalty for high similarity - NEW AGGRESSIVE APPROACH
+            const penalizedSimilarity = similarity > 0.8 ? similarity * 1.5 : similarity; // Extra penalty for very similar meals
+            
+            // Take the MAXIMUM weighted similarity (worst case dominates)
+            const weightedSimilarity = penalizedSimilarity * recencyWeight;
+            maxSimilarity = Math.max(maxSimilarity, weightedSimilarity);
         });
 
-        const averageSimilarity = weightedComparisons > 0 ? totalSimilarity / weightedComparisons : 0;
+        // SMART COOKBOOK-ONLY FALLBACK
+        // If user has limited cookbook recipes and cookbook-only preference, allow controlled repetition
+        const isLimitedCookbookOnly = this.shouldUseLimitedCookbookFallback(context, recentMeals);
         
-        // Convert similarity to variety score (inverse relationship)
-        const varietyScore = Math.max(0, 10 - (averageSimilarity * 10));
+        if (isLimitedCookbookOnly) {
+            // Use less aggressive scoring for limited cookbook scenario
+            return this.calculateLimitedCookbookVarietyScore(maxSimilarity, recentMeals.length);
+        }
+
+        // Convert similarity to variety score with AGGRESSIVE scaling (normal case)
+        let varietyScore = Math.max(0, 10 - (maxSimilarity * 12)); // Using max similarity instead of average
         
-        logger.debug(`MealVarietyTracker: Variety score for "${proposedMeal.title}": ${varietyScore.toFixed(2)}`);
+        // Additional penalty for exact matches - NUCLEAR OPTION
+        if (maxSimilarity >= 0.9) {
+            varietyScore = Math.max(0, varietyScore - 5); // Extra -5 penalty for near-exact matches
+        }
+        
+        logger.debug(`MealVarietyTracker: Variety score for "${proposedMeal.title}": ${varietyScore.toFixed(2)} (max similarity: ${maxSimilarity.toFixed(2)})`);
+        return varietyScore;
+    }
+
+    /**
+     * Determines if we should use the limited cookbook fallback scoring
+     * @param {object} context - Meal planning context
+     * @param {Array} recentMeals - Recent meals for analysis
+     * @returns {boolean} Whether to use limited cookbook fallback
+     */
+    shouldUseLimitedCookbookFallback(context, recentMeals) {
+        // Check if this is cookbook-only mode with limited recipes
+        const isCookbookOnly = context.recipeSourcePriority === 'cookbookOnly';
+        const totalAvailableRecipes = context.totalAvailableCookbookRecipes || 0;
+        const mealsNeeded = context.totalMealSlotsNeeded || 7;
+        
+        // If cookbook-only and recipes available are less than meals needed
+        if (isCookbookOnly && totalAvailableRecipes > 0 && totalAvailableRecipes < mealsNeeded) {
+            logger.info(`MealVarietyTracker: Using limited cookbook fallback - ${totalAvailableRecipes} recipes for ${mealsNeeded} meals`);
+            return true;
+        }
+        
+        return false;
+    }
+
+    /**
+     * Calculates variety score for limited cookbook scenarios
+     * Allows controlled repetition while still encouraging variety
+     * @param {number} maxSimilarity - Maximum similarity score
+     * @param {number} recentMealCount - Number of recent meals
+     * @returns {number} Adjusted variety score for limited cookbook
+     */
+    calculateLimitedCookbookVarietyScore(maxSimilarity, recentMealCount) {
+        // Less aggressive scaling for limited cookbook
+        let varietyScore = Math.max(0, 10 - (maxSimilarity * 8)); // Reduced from *12 to *8
+        
+        // Milder penalty for exact matches in limited scenarios
+        if (maxSimilarity >= 0.9) {
+            varietyScore = Math.max(0, varietyScore - 2); // Reduced from -5 to -2
+        }
+        
+        // Bonus for waiting longer between repetitions (applied BEFORE minimum)
+        if (recentMealCount >= 3) {
+            varietyScore += 2; // Increased from +1 to +2 for better differentiation
+        }
+        
+        // Ensure minimum score of 1.0 to allow eventual repetition
+        varietyScore = Math.max(1.0, varietyScore);
+        
+        logger.debug(`MealVarietyTracker: Limited cookbook variety score: ${varietyScore.toFixed(2)} (max similarity: ${maxSimilarity.toFixed(2)}, recent meals: ${recentMealCount})`);
         return varietyScore;
     }
 
@@ -121,40 +189,43 @@ class MealVarietyTracker {
     calculateMealSimilarity(meal1, meal2) {
         let similarity = 0;
 
-        // Exact title match (very high similarity)
+        // Exact title match (MAXIMUM similarity - this should be definitive)
         if (this.normalizeTitle(meal1.title) === this.normalizeTitle(meal2.title)) {
-            similarity = Math.max(similarity, this.similarityWeights.exactTitleMatch);
+            return 1.0; // Exact match = 100% similarity, no need to check anything else
         }
 
+        // If not exact match, check other factors (use additive approach with caps)
+        
         // Protein analysis
         const protein1 = this.extractProtein(meal1.title, meal1.keyIngredients);
         const protein2 = this.extractProtein(meal2.title, meal2.keyIngredients);
         if (protein1 && protein2 && protein1 === protein2) {
-            similarity = Math.max(similarity, this.similarityWeights.proteinMatch);
+            similarity += this.similarityWeights.proteinMatch;
         }
 
         // Cuisine analysis
         const cuisine1 = this.extractCuisine(meal1.title);
         const cuisine2 = this.extractCuisine(meal2.title);
         if (cuisine1 && cuisine2 && cuisine1 === cuisine2) {
-            similarity = Math.max(similarity, this.similarityWeights.cuisineMatch);
+            similarity += this.similarityWeights.cuisineMatch;
         }
 
         // Main ingredient analysis
         const mainIngredient1 = this.extractMainIngredient(meal1.title, meal1.keyIngredients);
         const mainIngredient2 = this.extractMainIngredient(meal2.title, meal2.keyIngredients);
         if (mainIngredient1 && mainIngredient2 && mainIngredient1 === mainIngredient2) {
-            similarity = Math.max(similarity, this.similarityWeights.mainIngredientMatch);
+            similarity += this.similarityWeights.mainIngredientMatch;
         }
 
         // Cooking method analysis
         const method1 = this.extractCookingMethod(meal1.title);
         const method2 = this.extractCookingMethod(meal2.title);
         if (method1 && method2 && method1 === method2) {
-            similarity = Math.max(similarity, this.similarityWeights.cookingMethodMatch);
+            similarity += this.similarityWeights.cookingMethodMatch;
         }
 
-        return similarity;
+        // Cap similarity at 1.0 but allow it to accumulate for very similar meals
+        return Math.min(1.0, similarity);
     }
 
     /**
@@ -185,6 +256,11 @@ class MealVarietyTracker {
             'french': ['coq au vin', 'bouillabaisse', 'ratatouille', 'crème', 'sauce'],
             'american': ['burger', 'bbq', 'mac and cheese', 'fried chicken', 'coleslaw']
         };
+
+        // Add null safety
+        if (!title) {
+            return null;
+        }
 
         const titleLower = title.toLowerCase();
         
@@ -227,9 +303,36 @@ class MealVarietyTracker {
     }
 
     /**
-     * Generates variety guidance data for compact prompt formatter
+     * Creates explicit exclusion list for prompt engineering
      * @param {Array} recentMeals - Recently used meals
-     * @returns {object} Structured variety guidance data
+     * @param {number} exclusionThreshold - Similarity threshold for exclusion (default 0.7)
+     * @returns {Array} List of recipe titles to explicitly avoid
+     */
+    generateExclusionList(recentMeals, exclusionThreshold = 0.7) {
+        if (recentMeals.length === 0) return [];
+
+        const exclusions = new Set();
+        
+        // Add exact recent recipes to exclusion list
+        recentMeals.slice(0, 10).forEach(meal => {
+            if (meal.title) {
+                exclusions.add(meal.title);
+                
+                // Also add normalized variations to catch similar titles
+                const normalized = this.normalizeTitle(meal.title);
+                if (normalized !== meal.title) {
+                    exclusions.add(normalized);
+                }
+            }
+        });
+
+        return Array.from(exclusions);
+    }
+
+    /**
+     * Generates comprehensive variety guidance for prompt with exclusions
+     * @param {Array} recentMeals - Recently used meals
+     * @returns {object} Enhanced variety guidance with exclusions
      */
     generateVarietyGuidanceForPrompt(recentMeals) {
         if (recentMeals.length === 0) {
@@ -237,7 +340,8 @@ class MealVarietyTracker {
                 recentCuisines: [],
                 recentProteins: [],
                 recommendedCuisines: ['Italian', 'Asian', 'Mexican'],
-                diversityScore: 10
+                diversityScore: 10,
+                explicitExclusions: []
             };
         }
 
@@ -275,7 +379,8 @@ class MealVarietyTracker {
             recentMethods: Array.from(recentMethods).slice(0, 3),
             recommendedCuisines,
             recommendedProteins,
-            diversityScore: this.calculateDiversityScore(recentMeals)
+            diversityScore: this.calculateDiversityScore(recentMeals),
+            explicitExclusions: this.generateExclusionList(recentMeals)  // NEW - explicit exclusions
         };
     }
 
@@ -361,9 +466,10 @@ class MealVarietyTracker {
      * @param {Array} mealSuggestions - Proposed meal suggestions
      * @param {Array} recentMeals - Recently used meals
      * @param {number} maxSuggestions - Maximum number to return
+     * @param {object} context - Additional context for smart fallbacks
      * @returns {Array} Filtered and ranked meal suggestions
      */
-    filterByVariety(mealSuggestions, recentMeals, maxSuggestions = 10) {
+    filterByVariety(mealSuggestions, recentMeals, maxSuggestions = 10, context = {}) {
         if (mealSuggestions.length === 0) {
             return [];
         }
@@ -371,7 +477,7 @@ class MealVarietyTracker {
         // Calculate variety scores for all suggestions
         const scoredSuggestions = mealSuggestions.map(suggestion => ({
             ...suggestion,
-            varietyScore: this.calculateVarietyScore(suggestion, recentMeals)
+            varietyScore: this.calculateVarietyScore(suggestion, recentMeals, context)
         }));
 
         // Sort by variety score (highest first) and return top suggestions
@@ -407,6 +513,7 @@ class MealVarietyTracker {
             };
 
             // Store in a collection for variety tracking
+            // NOTE: This creates a separate usage tracking collection - different from main mealPlans
             await firestoreHelper.saveDocument(
                 `users/${userId}/meal_usage_history`,
                 planId,

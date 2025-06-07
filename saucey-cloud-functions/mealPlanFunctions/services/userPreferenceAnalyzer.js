@@ -305,6 +305,11 @@ class UserPreferenceAnalyzer {
         
         // Process view history with decay
         viewHistory.forEach(entry => {
+            // Skip entries without valid recipeId
+            if (!entry.recipeId) {
+                return;
+            }
+            
             const viewDate = entry.viewedAt?.toMillis ? entry.viewedAt.toMillis() : entry.viewedAt;
             const daysSince = (now - viewDate) / (1000 * 60 * 60 * 24);
             const weight = Math.exp(-0.1 * daysSince); // Exponential decay
@@ -318,6 +323,11 @@ class UserPreferenceAnalyzer {
 
         // Process cook logs with higher weight
         cookLogs.forEach(log => {
+            // Skip logs without valid recipeId
+            if (!log.recipeId) {
+                return;
+            }
+            
             const cookDate = log.cookedDate?.toMillis ? log.cookedDate.toMillis() : log.cookedDate;
             const daysSince = (now - cookDate) / (1000 * 60 * 60 * 24);
             const weight = Math.exp(-0.05 * daysSince) * 3; // Slower decay, higher base weight
@@ -338,7 +348,8 @@ class UserPreferenceAnalyzer {
                 engagement: data.weight,
                 views: data.views,
                 cooks: data.cooks
-            }));
+            }))
+            .filter(recipe => recipe.recipeId); // Final safety filter
     }
 
     /**

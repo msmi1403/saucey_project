@@ -207,6 +207,76 @@ describe('Optimized Meal Plan Generation Integration', () => {
             // Should take longer without cache but still reasonable
             expect(endTime - startTime).toBeLessThan(500);
         });
+
+        test('should work with the actual meal planning workflow', async () => {
+            // Mock a realistic scenario
+            const mockMealPlans = [
+                {
+                    planId: 'current-week',
+                    createdAt: new Date(),
+                    days: [
+                        {
+                            date: '2024-01-15',
+                            meals: {
+                                dinner: [{ title: 'Lemon Herb Baked Salmon', recipeId: 'salmon-1' }],
+                                lunch: [{ title: 'Caesar Salad', recipeId: 'salad-1' }]
+                            }
+                        },
+                        {
+                            date: '2024-01-16', 
+                            meals: {
+                                dinner: [{ title: 'Chicken Parmesan', recipeId: 'chicken-1' }]
+                            }
+                        }
+                    ]
+                }
+            ];
+
+            // Setup mocks in correct order for the workflow
+            firestoreHelper.getDocument.mockResolvedValue(cachedProfile);
+            firestoreHelper.getCollection
+                .mockResolvedValueOnce([]) // No recent activity for cache invalidation
+                .mockResolvedValueOnce(mockMealPlans) // Recent meal plans from correct collection
+                .mockResolvedValueOnce(mockCookbookRecipes); // User's cookbook recipes
+
+            // Execute the workflow
+            const startTime = Date.now();
+
+            // Step 1: Get cached user preferences
+            const userProfile = await cacheManager.getCachedUserPreferences(
+                mockUserId,
+                preferenceAnalyzer.generateUserPreferenceProfile.bind(preferenceAnalyzer)
+            );
+
+            // Step 2: Get recent meals for variety tracking
+            const recentMeals = await varietyTracker.getRecentlyUsedRecipes(mockUserId, 4);
+            
+            // Step 3: Generate variety guidance
+            const guidance = varietyTracker.generateVarietyGuidanceForPrompt(recentMeals);
+            
+            // Step 4: Test proposed new meals
+            const proposedMeals = [
+                { title: 'Lemon Herb Baked Salmon' }, // Repeat - should score low
+                { title: 'Thai Green Curry' } // New - should score high
+            ];
+
+            const salmonScore = varietyTracker.calculateVarietyScore(proposedMeals[0], recentMeals);
+            const curryScore = varietyTracker.calculateVarietyScore(proposedMeals[1], recentMeals);
+
+            // Verify the system works as expected
+            expect(recentMeals.length).toBeGreaterThan(0);
+            expect(guidance).toHaveProperty('recentProteins');
+            expect(guidance).toHaveProperty('explicitExclusions');
+            expect(salmonScore).toBeLessThan(curryScore); // Repetition should score lower
+            expect(guidance.explicitExclusions).toContain('Lemon Herb Baked Salmon');
+
+            const endTime = Date.now();
+            expect(endTime - startTime).toBeLessThan(2000); // Should be fast with caching
+
+            // Verify correct collection paths were used
+            const getCollectionCalls = firestoreHelper.getCollection.mock.calls;
+            expect(getCollectionCalls.some(call => call[0].includes('/mealPlans'))).toBe(true); // Fixed path
+        });
     });
 
     describe('Token Efficiency Validation', () => {

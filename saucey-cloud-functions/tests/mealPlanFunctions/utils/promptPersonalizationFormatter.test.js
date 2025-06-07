@@ -260,6 +260,57 @@ describe('PromptPersonalizationFormatter', () => {
 
             expect(result).toBe('');
         });
+
+        test('should format variety guidance with explicit exclusions', () => {
+            const varietyGuidance = {
+                explicitExclusions: ['Lemon Herb Baked Salmon', 'Chicken Parmesan'],
+                recentProteins: ['chicken', 'salmon'],
+                recentCuisines: ['Italian'],
+                recommendedProteins: ['beef', 'pork'],
+                recommendedCuisines: ['Mexican', 'Thai'],
+                diversityScore: 5
+            };
+
+            const formatted = formatter.formatVarietyGuidance(varietyGuidance);
+
+            expect(formatted).toContain('AVOID_EXACTLY:[Lemon Herb Baked Salmon, Chicken Parmesan]');
+            expect(formatted).toContain('RECENT_PROTEINS:[chicken, salmon]');
+            expect(formatted).toContain('RECENT_CUISINES:[Italian]');
+            expect(formatted).toContain('PRIORITIZE_PROTEINS:[beef, pork]');
+            expect(formatted).toContain('PRIORITIZE_CUISINES:[Mexican, Thai]');
+            expect(formatted).toContain('DIVERSITY_SCORE:5');
+        });
+
+        test('should handle empty exclusions gracefully', () => {
+            const varietyGuidance = {
+                explicitExclusions: [],
+                recentProteins: ['chicken'],
+                diversityScore: 8
+            };
+
+            const formatted = formatter.formatVarietyGuidance(varietyGuidance);
+
+            expect(formatted).not.toContain('AVOID_EXACTLY');
+            expect(formatted).toContain('RECENT_PROTEINS:[chicken]');
+            expect(formatted).toContain('DIVERSITY_SCORE:8');
+        });
+
+        test('should limit exclusions to prevent token bloat', () => {
+            const varietyGuidance = {
+                explicitExclusions: [
+                    'Recipe 1', 'Recipe 2', 'Recipe 3', 'Recipe 4', 'Recipe 5',
+                    'Recipe 6', 'Recipe 7', 'Recipe 8', 'Recipe 9', 'Recipe 10',
+                    'Recipe 11', 'Recipe 12' // More than 8
+                ]
+            };
+
+            const formatted = formatter.formatVarietyGuidance(varietyGuidance);
+            
+            // Should only include first 8 exclusions
+            const exclusionPart = formatted.match(/AVOID_EXACTLY:\[(.*?)\]/)[1];
+            const exclusionCount = exclusionPart.split(',').length;
+            expect(exclusionCount).toBe(8);
+        });
     });
 
     describe('formatCookingPatterns', () => {

@@ -70,7 +70,7 @@ class UserPreferenceCacheManager {
      */
     async getValidCachedProfile(userId) {
         try {
-            const cacheDoc = await firestoreHelper.getDocument(`${this.CACHE_COLLECTION}/${userId}`);
+            const cacheDoc = await firestoreHelper.getDocument(this.CACHE_COLLECTION, userId);
             
             if (!cacheDoc || !cacheDoc.cacheMetadata) {
                 return null;
@@ -114,7 +114,7 @@ class UserPreferenceCacheManager {
                 }
             };
 
-            await firestoreHelper.setDocument(`${this.CACHE_COLLECTION}/${userId}`, cacheData);
+            await firestoreHelper.saveDocument(this.CACHE_COLLECTION, userId, cacheData, { merge: true });
             logger.info(`PreferenceCacheManager: Cached profile for ${userId}`);
 
         } catch (error) {
@@ -134,10 +134,12 @@ class UserPreferenceCacheManager {
 
         try {
             // Mark cache as invalidated rather than deleting
-            await firestoreHelper.updateDocument(`${this.CACHE_COLLECTION}/${userId}`, {
+            const updateData = {
                 'cacheMetadata.invalidatedAt': Date.now(),
                 'cacheMetadata.invalidatedBy': eventType
-            });
+            };
+
+            await firestoreHelper.saveDocument(this.CACHE_COLLECTION, userId, updateData, { merge: true });
 
             logger.info(`PreferenceCacheManager: Invalidated cache for ${userId} due to ${eventType}`);
 
@@ -250,7 +252,7 @@ class UserPreferenceCacheManager {
             });
 
             for (const entry of expiredEntries || []) {
-                await firestoreHelper.deleteDocument(`${this.CACHE_COLLECTION}/${entry.userId}`);
+                await firestoreHelper.deleteDocument(this.CACHE_COLLECTION, entry.id);
             }
 
             if (expiredEntries && expiredEntries.length > 0) {
