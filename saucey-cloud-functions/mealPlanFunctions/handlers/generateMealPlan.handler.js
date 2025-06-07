@@ -67,15 +67,19 @@ const generateMealPlan = functions.onCall({ timeoutSeconds: 300 }, async (reques
 
   try {
     // PHASE 1: Gather all user context in parallel (keep the smart personalization)
+    logger.info("generateMealPlan: Starting user context gathering", { userId });
     const userContext = await buildUserContext(userId);
     
     // PHASE 2: Build comprehensive prompt with all personalization data
+    logger.info("generateMealPlan: Building personalized prompt", { userId });
     const prompt = await buildMealPlanPrompt(preferences, userContext, weekAlignedStartDate);
     
     // PHASE 3: Single AI call for complete plan
+    logger.info("generateMealPlan: Generating meal plan with AI", { userId });
     const aiResponse = await callAiForMealPlan(prompt, userId);
     
     // PHASE 4: Transform response to MealPlanDocument
+    logger.info("generateMealPlan: Finalizing meal plan", { userId });
     const mealPlan = transformAiResponseToMealPlan(aiResponse, preferences, weekAlignedStartDate, userId);
     
     logger.info("generateMealPlan: Successfully generated complete meal plan", {
