@@ -89,34 +89,84 @@ function validateGenerateAiMealPlanParams(params) {
 
 /**
  * Validates the parameters for AI meal plan generation (chunked).
- * @param {object} params - The parameters to validate, including chunkIndex.
- * @param {number} fixedTotalChunks - The server-defined total number of chunks for context.
+ * @param {object} params - The parameters to validate.
+ * @param {number} maxTotalChunks - Maximum allowed total chunks for context.
  * @returns {{isValid: boolean, errors: string[]}} Validation result.
  */
-function validateGenerateAiMealPlanChunkParams(params, fixedTotalChunks) {
+function validateGenerateAiMealPlanChunkParams(params, maxTotalChunks) {
   const errors = [];
-  if (!params) {
-    errors.push("Request params for chunked generation are missing.");
-    return { isValid: false, errors };
+
+  // Required parameters
+  if (typeof params.chunkIndex !== 'number' || params.chunkIndex < 0) {
+    errors.push('chunkIndex must be a non-negative number.');
   }
 
-  if (typeof params.chunkIndex !== 'number' || params.chunkIndex < 0 || !Number.isInteger(params.chunkIndex)) {
-    errors.push("Parameter 'chunkIndex' must be a non-negative integer.");
+  if (typeof params.durationDays !== 'number' || params.durationDays <= 0) {
+    errors.push('durationDays must be a positive number.');
   }
 
-  // Validate chunkIndex against the server-defined fixed total
-  if (typeof params.chunkIndex === 'number' && params.chunkIndex >= fixedTotalChunks) {
-    errors.push(`Parameter 'chunkIndex' (${params.chunkIndex}) must be less than server-defined total chunks (${fixedTotalChunks}).`);
+  // Optional parameters validation
+  if (params.targetMacros && typeof params.targetMacros !== 'object') {
+    errors.push('targetMacros must be an object.');
   }
 
-  validateBaseMealPlanParams(params, errors); // Call refactored base validation
-
-  if (errors.length > 0) {
-    logger.warn("validateGenerateAiMealPlanChunkParams: Validation failed.", { params, errors });
-    return { isValid: false, errors };
+  if (params.mealTypesToInclude && !Array.isArray(params.mealTypesToInclude)) {
+    errors.push('mealTypesToInclude must be an array.');
   }
 
-  return { isValid: true, errors: [] };
+  if (params.numberOfSnacks && (typeof params.numberOfSnacks !== 'number' || params.numberOfSnacks < 0)) {
+    errors.push('numberOfSnacks must be a non-negative number.');
+  }
+
+  if (params.maxPrepTimePerMealMinutes && (typeof params.maxPrepTimePerMealMinutes !== 'number' || params.maxPrepTimePerMealMinutes <= 0)) {
+    errors.push('maxPrepTimePerMealMinutes must be a positive number.');
+  }
+
+  if (params.dietaryNotes && typeof params.dietaryNotes !== 'string') {
+    errors.push('dietaryNotes must be a string.');
+  }
+
+  if (params.cuisinePreference && typeof params.cuisinePreference !== 'string') {
+    errors.push('cuisinePreference must be a string.');
+  }
+
+  // NEW: Validate preferences object
+  if (params.preferences) {
+    if (typeof params.preferences !== 'object') {
+      errors.push('preferences must be an object.');
+    } else {
+      // Validate recipeSourcePriority
+      if (params.preferences.recipeSourcePriority) {
+        const validSourcePriorities = ['cookbookOnly', 'balancedMix', 'discoverNew'];
+        if (!validSourcePriorities.includes(params.preferences.recipeSourcePriority)) {
+          errors.push(`recipeSourcePriority must be one of: ${validSourcePriorities.join(', ')}`);
+        }
+      }
+
+      // Validate availableCookingDays
+      if (params.preferences.availableCookingDays) {
+        if (!Array.isArray(params.preferences.availableCookingDays)) {
+          errors.push('availableCookingDays must be an array.');
+        } else {
+          const validDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+          const invalidDays = params.preferences.availableCookingDays.filter(day => !validDays.includes(day));
+          if (invalidDays.length > 0) {
+            errors.push(`availableCookingDays contains invalid days: ${invalidDays.join(', ')}`);
+          }
+        }
+      }
+    }
+  }
+
+  // Validate planStartDate if provided
+  if (params.planStartDate && typeof params.planStartDate !== 'string') {
+    errors.push('planStartDate must be a string.');
+  }
+
+  return {
+    isValid: errors.length === 0,
+    errors: errors
+  };
 }
 
 /**

@@ -227,7 +227,90 @@ class MealVarietyTracker {
     }
 
     /**
-     * Generates variety context for AI prompt
+     * Generates variety guidance data for compact prompt formatter
+     * @param {Array} recentMeals - Recently used meals
+     * @returns {object} Structured variety guidance data
+     */
+    generateVarietyGuidanceForPrompt(recentMeals) {
+        if (recentMeals.length === 0) {
+            return {
+                recentCuisines: [],
+                recentProteins: [],
+                recommendedCuisines: ['Italian', 'Asian', 'Mexican'],
+                diversityScore: 10
+            };
+        }
+
+        // Extract recent patterns
+        const recentProteins = new Set();
+        const recentCuisines = new Set();
+        const recentMethods = new Set();
+
+        recentMeals.slice(0, 15).forEach(meal => {
+            const protein = this.extractProtein(meal.title, meal.keyIngredients);
+            const cuisine = this.extractCuisine(meal.title);
+            const method = this.extractCookingMethod(meal.title);
+            
+            if (protein) recentProteins.add(protein);
+            if (cuisine) recentCuisines.add(cuisine);
+            if (method) recentMethods.add(method);
+        });
+
+        // Suggest variety based on what's missing
+        const allCuisines = ['Italian', 'Asian', 'Mexican', 'Mediterranean', 'American', 'Indian', 'Thai'];
+        const recommendedCuisines = allCuisines.filter(cuisine => 
+            !Array.from(recentCuisines).some(recent => 
+                recent.toLowerCase().includes(cuisine.toLowerCase())
+            )
+        ).slice(0, 3);
+
+        const allProteins = ['chicken', 'beef', 'pork', 'fish', 'vegetarian'];
+        const recommendedProteins = allProteins.filter(protein => 
+            !recentProteins.has(protein)
+        ).slice(0, 2);
+
+        return {
+            recentCuisines: Array.from(recentCuisines).slice(0, 4),
+            recentProteins: Array.from(recentProteins).slice(0, 3),
+            recentMethods: Array.from(recentMethods).slice(0, 3),
+            recommendedCuisines,
+            recommendedProteins,
+            diversityScore: this.calculateDiversityScore(recentMeals)
+        };
+    }
+
+    /**
+     * Calculates overall diversity score for recent meals
+     * @param {Array} recentMeals - Recently used meals
+     * @returns {number} Diversity score (0-10)
+     */
+    calculateDiversityScore(recentMeals) {
+        if (recentMeals.length === 0) return 10;
+
+        const proteins = new Set();
+        const cuisines = new Set();
+        const methods = new Set();
+        const titles = new Set();
+
+        recentMeals.forEach(meal => {
+            proteins.add(this.extractProtein(meal.title, meal.keyIngredients));
+            cuisines.add(this.extractCuisine(meal.title));
+            methods.add(this.extractCookingMethod(meal.title));
+            titles.add(this.normalizeTitle(meal.title));
+        });
+
+        // Calculate diversity ratios
+        const proteinDiversity = proteins.size / Math.min(recentMeals.length, 8);
+        const cuisineDiversity = cuisines.size / Math.min(recentMeals.length, 6);
+        const methodDiversity = methods.size / Math.min(recentMeals.length, 5);
+        const titleDiversity = titles.size / recentMeals.length;
+
+        const averageDiversity = (proteinDiversity + cuisineDiversity + methodDiversity + titleDiversity) / 4;
+        return Math.round(averageDiversity * 10);
+    }
+
+    /**
+     * Generates variety context for AI prompt (legacy method)
      * @param {Array} recentMeals - Recently used meals
      * @returns {string} Formatted context for AI prompt
      */

@@ -7,6 +7,8 @@ const { validateGenerateAiMealPlanChunkParams } = require("../utils/validationHe
 const { UserPreferenceAnalyzer } = require("../services/userPreferenceAnalyzer");
 const { CookbookRecipeSelector } = require("../services/cookbookRecipeSelector");
 const { MealVarietyTracker } = require("../services/mealVarietyTracker");
+const UserPreferenceCacheManager = require("../services/userPreferenceCacheManager");
+const PromptPersonalizationFormatter = require("../utils/promptPersonalizationFormatter");
 const fs = require('fs');
 const path = require('path');
 
@@ -41,6 +43,8 @@ const aiPlanGenerator = functions.onCall({ timeoutSeconds: 300 }, async (request
   const userPreferenceAnalyzer = new UserPreferenceAnalyzer();
   const cookbookRecipeSelector = new CookbookRecipeSelector();
   const mealVarietyTracker = new MealVarietyTracker();
+  const preferenceCache = new UserPreferenceCacheManager();
+  const promptFormatter = new PromptPersonalizationFormatter();
 
   let { params } = request.data;
 
@@ -64,9 +68,12 @@ const aiPlanGenerator = functions.onCall({ timeoutSeconds: 300 }, async (request
 
   logger.info(`aiPlanGenerator (chunk mode): Generating chunk ${chunkIndex}/${FIXED_TOTAL_CHUNKS_FOR_CONTEXT -1} (${FIXED_DURATION_DAYS_PER_CHUNK} days, starting global day ${dayOffset + 1}).`, { userId });
 
-  // PHASE 1: Generate User Preference Profile
-  logger.info(`aiPlanGenerator: Generating user preference profile for ${userId}`);
-  const userProfile = await userPreferenceAnalyzer.generateUserPreferenceProfile(userId);
+  // PHASE 1: Get User Preference Profile (with caching)
+  logger.info(`aiPlanGenerator: Getting user preference profile for ${userId}`);
+  const userProfile = await preferenceCache.getCachedUserPreferences(
+    userId, 
+    userPreferenceAnalyzer.generateUserPreferenceProfile.bind(userPreferenceAnalyzer)
+  );
   
   // PHASE 2: Get Recent Meals for Variety Tracking
   logger.info(`aiPlanGenerator: Fetching recent meals for variety tracking`);
@@ -251,29 +258,26 @@ ${Array.from({length: 7}, (_, idx) => {
     }
     fullPrompt = fullPrompt.replace('{{maxPrepTimePrompt}}', maxPrepTimePrompt);
     
-    // PHASE 5: Add Personalization Context to Prompt
-    let personalizationPrompt = "";
-    if (userProfile.dataQuality.hasGoodData) {
-      const userContext = userPreferenceAnalyzer.formatProfileForPrompt(userProfile);
-      personalizationPrompt = `USER PREFERENCES: ${userContext}`;
-    }
+    // PHASE 5: Generate Optimized Personalization Context
+    const varietyGuidance = mealVarietyTracker.generateVarietyGuidanceForPrompt(recentMeals);
     
-    // Add variety guidance
-    const varietyContext = mealVarietyTracker.generateVarietyContextForPrompt(recentMeals);
-    if (varietyContext) {
-      personalizationPrompt += ` ${varietyContext}`;
-    }
+    // Use new compact formatter
+    const personalizationPrompt = promptFormatter.formatPersonalizationPrompt(
+      userProfile, 
+      selectedCookbookRecipes, 
+      varietyGuidance
+    );
     
-    // Add selected cookbook recipes
-    const cookbookContext = cookbookRecipeSelector.formatSelectedRecipesForPrompt(selectedCookbookRecipes);
-    if (selectedCookbookRecipes.length > 0) {
-      personalizationPrompt += ` COOKBOOK INTEGRATION: ${cookbookContext} Please incorporate some of these cookbook recipes appropriately into the meal plan.`;
-    }
+    // Log token efficiency metrics
+    const estimatedTokens = promptFormatter.estimateTokenCount(personalizationPrompt);
+    logger.info(`aiPlanGenerator: Personalization section - ${estimatedTokens} tokens, ${personalizationPrompt.length} chars`);
     
-    // Recipe source guidance
-    personalizationPrompt += ` RECIPE SOURCE PRIORITY: User prefers "${recipeSourcePriority}" (${cookbookCount} cookbook + ${aiCount} new AI recipes for this week).`;
+    // Fallback to natural language if structured format is too dense
+    const finalPersonalizationPrompt = promptFormatter.isWithinTokenLimits(personalizationPrompt) 
+      ? personalizationPrompt
+      : promptFormatter.formatNaturalLanguagePrompt(userProfile, selectedCookbookRecipes);
     
-    fullPrompt = fullPrompt.replace('{{personalizationPrompt}}', personalizationPrompt);
+    fullPrompt = fullPrompt.replace('{{personalizationPrompt}}', finalPersonalizationPrompt);
     fullPrompt = fullPrompt.split('\n').filter(line => line.trim() !== '').join('\n');
 
   logger.info(`aiPlanGenerator (chunk mode): Constructed prompt for chunk ${chunkIndex} (days ${dayOffset + 1}-${dayOffset + FIXED_DURATION_DAYS_PER_CHUNK})`, { userId, promptLength: fullPrompt.length, weekContext: weekContextPrompt });

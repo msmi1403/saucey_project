@@ -10,11 +10,10 @@ class CookbookRecipeSelector {
 
     constructor() {
         // Recipe source distribution ratios
-        // Recipe source distribution ratios (updated based on user engagement research)
         this.recipeSourceRatios = {
             'cookbookOnly': { cookbook: 1.0, ai: 0.0 },
-            'balancedMix': { cookbook: 0.7, ai: 0.3 },  // 70/30 for better familiarity/discovery balance
-            'discoverNew': { cookbook: 0.4, ai: 0.6 }   // 40/60 for more conservative discovery mode
+            'balancedMix': { cookbook: 0.5, ai: 0.5 },
+            'discoverNew': { cookbook: 0.2, ai: 0.8 }
         };
     }
 
