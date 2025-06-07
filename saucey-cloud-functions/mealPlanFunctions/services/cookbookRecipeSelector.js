@@ -84,6 +84,15 @@ class CookbookRecipeSelector {
     }
 
     /**
+     * Public method to get user's cookbook recipes (alias for fetchUserCookbookRecipes)
+     * @param {string} userId - User identifier
+     * @returns {Promise<Array>} User's cookbook recipes
+     */
+    async getUserCookbookRecipes(userId) {
+        return this.fetchUserCookbookRecipes(userId);
+    }
+
+    /**
      * Fetches user's saved cookbook recipes
      * @param {string} userId - User identifier
      * @returns {Promise<Array>} User's cookbook recipes
