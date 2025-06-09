@@ -1,0 +1,61 @@
+You are an expert recipe developer. Convert the following recipe stub into a complete, detailed recipe.
+
+**RECIPE STUB TO EXPAND:**
+Title: {{title}}
+Key Ingredients: {{keyIngredients}}
+Estimated Macros: {{estimatedMacros}}
+Target Servings: {{targetServings}}
+
+**REQUIREMENTS:**
+- Generate a complete recipe that serves exactly {{targetServings}} people
+- Scale all ingredients proportionally for {{targetServings}} servings
+- Adjust cooking instructions for the larger batch size (cooking times, equipment suggestions, etc.)
+- If {{targetServings}} > 4, include batch cooking tips and storage recommendations
+- Maintain the estimated macro profile per serving
+- Calculate accurate macros for the final recipe
+- Ensure recipe is practical and executable
+
+{{cuisineContext}}
+{{dietaryContext}}
+{{cookingContext}}
+
+**OUTPUT FORMAT (JSON):**
+```json
+{
+  "title": "Recipe title here",
+  "description": "Brief description of the dish",
+  "ingredients": [
+    {
+      "name": "ingredient name",
+      "quantity": 2.0,
+      "unit": "cups",
+      "notes": "optional preparation notes"
+    }
+  ],
+  "instructions": [
+    "Step 1: Detailed instruction...",
+    "Step 2: Detailed instruction..."
+  ],
+  "macros": {
+    "calories": 450.0,
+    "protein": 25.0,
+    "carbs": 30.0,
+    "fat": 20.0
+  },
+  "prepTimeMinutes": 15,
+  "cookTimeMinutes": 30,
+  "servings": {{targetServings}},
+  "tags": ["tag1", "tag2"],
+  "difficulty": "Easy|Medium|Hard",
+  "cuisine": "cuisine type",
+  "tips": [
+    "Cooking tip 1",
+    "Storage recommendation 2"
+  ]
+}
+```
+
+**IMPORTANT:** 
+- Calculate macros as **per-serving values** (not total for all servings)
+- Ensure ingredients scale correctly for {{targetServings}} servings
+- Include batch cooking tips if servings > 4 

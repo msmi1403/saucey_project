@@ -25,6 +25,10 @@ const GEMINI_SAFETY_SETTINGS = [
     { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
 ];
 
+// Shared Image Processing Configuration
+const MAX_IMAGE_UPLOAD_SIZE_BYTES = parseInt(process.env.MAX_IMAGE_UPLOAD_SIZE_BYTES, 10) || 10 * 1024 * 1024; // 10MB limit (same as working system)
+const SUPPORTED_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']; // Include all types from working system
+
 module.exports = {
     PROJECT_ID,
     LOCATION,
@@ -34,4 +38,6 @@ module.exports = {
     GEMINI_TEXT_TEMPERATURE, // if shared
     GEMINI_TEXT_MAX_OUTPUT_TOKENS, // if shared
     GEMINI_SAFETY_SETTINGS, // Export the safety settings
+    MAX_IMAGE_UPLOAD_SIZE_BYTES, // Shared image processing config
+    SUPPORTED_IMAGE_MIME_TYPES, // Shared image processing config
 };

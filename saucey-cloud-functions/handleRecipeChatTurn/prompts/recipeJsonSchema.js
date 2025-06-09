@@ -13,6 +13,16 @@ module.exports = {
     totalTime: { type: ["string", "null"] }, // Consider "format: duration"
     servings: { type: ["number", "null"], minimum: 0 },
     calories: { type: ["string", "null"] },
+    macros: {
+      type: ["object", "null"],
+      properties: {
+        calories: { type: "number", minimum: 0 },
+        protein: { type: "number", minimum: 0 },
+        carbs: { type: "number", minimum: 0 },
+        fat: { type: "number", minimum: 0 }
+      },
+      required: ["calories", "protein", "carbs", "fat"]
+    },
     ingredients: {
       type: ["array", "null"],
       items: {

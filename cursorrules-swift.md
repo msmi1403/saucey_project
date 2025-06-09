@@ -1,5 +1,10 @@
 # @label Rules for Saucey Swift Project
 
+## 🎯 Overarching Agent Directives
+- **Simplicity & Elegance**: Before finalizing any code, the agent should ask, “Is there a simpler, more standardized way to achieve this?” and favor solutions that minimize complexity, avoid duplication, and leverage existing abstractions.
+
+
+
 ## General Swift Best Practices
 
 -   **Clarity and Readability**:
@@ -176,5 +181,9 @@ The project appears to be using an MVVM-like architecture, especially in the `Fe
     -   `CookbookViewModel` is quite large and handles chapters, recipe management, search, and navigation triggers. This is an area to monitor as the app grows.
     -   `RecipeChatViewModel` also manages conversation state, message sending, and interaction with other ViewModels.
 -   **Limit Closure Nesting**: If you have closures nested several levels deep (e.g., in Combine chains or completion handlers), try to flatten them using `async/await` where possible or by extracting parts into separate functions. The project already makes good use of `async/await`, which helps mitigate this.
+
+## 🔧 Swift-Specific Build Context
+- **Build & Test Target**: Always compile and run UI tests against the **iPhone 16 Pro** simulator in Xcode to validate SwiftUI layouts and ensure compatibility with the latest SDK.
+
 
 By adhering to these rules and principles, the "Saucey" project can maintain a clean, scalable, and maintainable codebase.

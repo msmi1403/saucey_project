@@ -56,5 +56,9 @@ Object.assign(exports, require("./triggers/scheduledTriggers"));
 // Assuming "./mealPlanFunctions" (which should point to mealPlanService.js) exports all its Gen 2 functions directly
 Object.assign(exports, require("./mealPlanFunctions"));
 
+// My Ingredients Functions
+Object.assign(exports, require("./myIngredientsFunctions/analyzeMyIngredients"));
+Object.assign(exports, require("./myIngredientsFunctions/analyzeMyIngredientsText"));
+
 
 logger.log("Saucey Cloud Functions (root index.js) processed for FULL deployment. Exports prepared.");

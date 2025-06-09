@@ -27,6 +27,12 @@ JSON Schema for Recipe Output:
   "totalTime": "string (Estimated total time in ISO 8601 duration format, e.g., 'PT1H30M'. Optional but preferred if prep/cook times are present.)",
   "servings": "number (e.g., 4. Must be a positive number if provided. Optional.)",
   "calories": "string (e.g., 'Approx. 250 kcal per serving'. Optional.)",
+  "macros": {
+    "calories": "number (Accurate numerical calories per serving, e.g., 250. Calculate this based on ingredients and portions.)",
+    "protein": "number (Grams of protein per serving, e.g., 15.5. Calculate based on ingredients.)",
+    "carbs": "number (Grams of carbohydrates per serving, e.g., 32.0. Calculate based on ingredients.)",
+    "fat": "number (Grams of fat per serving, e.g., 8.2. Calculate based on ingredients.)"
+  },
   "ingredients": [
     {
       "item_name": "string (The name of the ingredient, e.g., 'all-purpose flour', 'large eggs'). REQUIRED if ingredients array is present.",
@@ -44,12 +50,21 @@ JSON Schema for Recipe Output:
   ],
   "tipsAndVariations": ["string (A list of helpful tips or variations for the recipe. Optional.)"],
   "keywords": ["string (Relevant keywords or tags for searching, e.g., 'quick', 'healthy', 'vegan'. Optional.)"],
-  "imageURL": "string (A URL to an image of the finished dish. If you generate a recipe and don't have a real image, you can omit this or use a conceptual placeholder description like 'Image of a vibrant pasta dish'. Optional.)",
+  "imageURL": "string (A valid HTTP/HTTPS URL to an image of the finished dish. MUST be a complete, working URL (e.g., 'https://example.com/image.jpg') or completely omit this field if no actual image URL is available. Do NOT use placeholder text or descriptions - only real image URLs. Optional.)",
   "source": "string (This will be set by the system based on how the recipe was generated, e.g., 'gemini_text_prompt'. You do not need to set this field.)",
   "isPublic": "boolean (Indicates if the recipe is intended for public sharing. Defaults to false. Optional.)",
   "isSecretRecipe": "boolean (Indicates if the ENTIRE recipe should be considered a secret. Defaults to false. Optional.)",
   "conversationalText": "string (IMPORTANT: Use this field ONLY for non-recipe responses or when the query cannot be formed into a recipe. In such cases, ALL other recipe-specific fields above (like title, ingredients, instructions, etc.) MUST be null or omitted from the JSON response. Provide the direct answer to the user's question in this 'conversationalText' field.)"
 }
+
+IMPORTANT MACRO CALCULATION REQUIREMENTS:
+- The 'macros' field should contain accurate per-serving nutritional calculations based on the ingredients and their quantities
+- Use standard nutritional databases and food composition data to estimate macros for each ingredient
+- Calculate totals for the entire recipe, then divide by the number of servings to get per-serving values
+- Round macro values to one decimal place (e.g., 15.2g protein, not 15.23456g)
+- If you cannot accurately calculate macros due to vague ingredient quantities (like "a pinch"), provide reasonable estimates
+- The calories in the 'macros' object should be the numerical value that corresponds to the descriptive 'calories' string field
+
 If a field is marked as "Optional" and no relevant information is available or applicable, omit the field or set its value to null, as appropriate for its type (e.g., null for strings/numbers, empty array [] for arrays of strings/objects).
 Empty strings for optional string fields are acceptable if the field itself is present.
 For 'ingredients' and 'instructions', if the recipe inherently has none (which is rare for a valid recipe), an empty array is acceptable; otherwise, these arrays are REQUIRED and should contain valid item/step objects.

@@ -304,13 +304,19 @@ function buildConstraintsContext(preferences) {
     constraints.push('REQUIRED MEAL TYPES ONLY: None specified - Generate no meals');
   }
 
-  // Target macros
-  if (preferences.targetMacros) {
+  // Cuisine preferences - CRITICAL CONSTRAINT
+  if (preferences.preferredCuisines?.length > 0) {
+    const cuisines = preferences.preferredCuisines.join(', ');
+    constraints.push(`REQUIRED CUISINE STYLE: ${cuisines} - ALL recipes must be authentic ${cuisines} dishes. Do NOT generate generic Western/American meals.`);
+  }
+
+  // Target macros - FIX FIELD NAME
+  if (preferences.macroTargets) {
     const macros = [];
-    if (preferences.targetMacros.calories) macros.push(`${preferences.targetMacros.calories} kcal`);
-    if (preferences.targetMacros.protein) macros.push(`${preferences.targetMacros.protein}g protein`);
-    if (preferences.targetMacros.carbs) macros.push(`${preferences.targetMacros.carbs}g carbs`);
-    if (preferences.targetMacros.fat) macros.push(`${preferences.targetMacros.fat}g fat`);
+    if (preferences.macroTargets.calories) macros.push(`${preferences.macroTargets.calories} kcal`);
+    if (preferences.macroTargets.protein) macros.push(`${preferences.macroTargets.protein}g protein`);
+    if (preferences.macroTargets.carbs) macros.push(`${preferences.macroTargets.carbs}g carbs`);
+    if (preferences.macroTargets.fat) macros.push(`${preferences.macroTargets.fat}g fat`);
     if (macros.length > 0) {
       constraints.push(`Daily Target Macros: ${macros.join(', ')}`);
     }
@@ -338,6 +344,34 @@ function buildConstraintsContext(preferences) {
   // Snacks
   if (preferences.numberOfSnacks > 0) {
     constraints.push(`Include ${preferences.numberOfSnacks} snack(s) per day on cooking days`);
+  }
+
+  // Cooking experience
+  if (preferences.cookingExperience) {
+    const experienceMapping = {
+      'beginner': 'Beginner - prefer simple recipes with basic techniques',
+      'intermediate': 'Intermediate - comfortable with moderate complexity',
+      'advanced': 'Advanced - can handle complex techniques and ingredients'
+    };
+    const experience = experienceMapping[preferences.cookingExperience] || preferences.cookingExperience;
+    constraints.push(`Cooking Experience: ${experience}`);
+  }
+
+  // Prep volume/batch cooking - ENHANCED WITH SERVING CALCULATION
+  if (preferences.prepVolume) {
+    const prepMapping = {
+      'mealByMeal': 'Individual meals - no batch cooking',
+      'batchPrep': 'Batch prep preferred - recipes suitable for meal prep and storage'
+    };
+    const prep = prepMapping[preferences.prepVolume] || preferences.prepVolume;
+    constraints.push(`Prep Style: ${prep}`);
+    
+    // Calculate batch size for batch prep
+    if (preferences.prepVolume === 'batchPrep') {
+      const cookingDays = preferences.availableCookingDays?.length || 7;
+      const batchSize = Math.ceil(7 / cookingDays); // Days of food per cooking session
+      constraints.push(`Batch Size: Make ${batchSize}x servings per recipe to last ${batchSize} days`);
+    }
   }
 
   return constraints.join('\n');
@@ -406,6 +440,17 @@ function transformAiResponseToMealPlan(aiResponse, preferences, startDate, userI
   const planId = generatePlanId();
   const now = new Date().toISOString();
   
+  // Calculate batch servings based on prep volume
+  const getBatchServings = () => {
+    if (preferences.prepVolume === 'batchPrep') {
+      const cookingDays = preferences.availableCookingDays?.length || 7;
+      return Math.ceil(7 / cookingDays); // Days of food per cooking session
+    }
+    return 1.0; // Individual servings for meal-by-meal
+  };
+  
+  const batchServings = getBatchServings();
+  
   // Transform AI days to DayPlan format
   const dayPlans = aiResponse.plan.map((aiDay, index) => {
     const dayDate = new Date(startDate);
@@ -420,7 +465,7 @@ function transformAiResponseToMealPlan(aiResponse, preferences, startDate, userI
         recipeId: null,
         title: item.title,
         estimatedMacros: item.estimatedMacros,
-        servings: 1.0,
+        servings: batchServings, // Use calculated batch servings
         isStub: true,
         source: 'stub',
         keyIngredients: item.keyIngredients || []

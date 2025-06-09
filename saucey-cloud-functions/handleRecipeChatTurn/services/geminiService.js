@@ -3,6 +3,7 @@
 const geminiClient = require('@saucey/shared/services/geminiClient.js'); 
 const { extractJsonFromText } = require('@saucey/shared/utils/commonUtils.js'); 
 const { modelsInitializationPromise } = require('@saucey/shared/services/geminiClient.js');
+const imageProcessor = require('@saucey/shared/services/imageProcessor.js');
 
 const config = require('../config');
 
@@ -39,7 +40,7 @@ const recipeServiceModelsInitPromise = Promise.all([
 
 
 // This function remains specific to handleRecipeChatTurn's context building
-function buildCurrentUserTurnContextualPrompt(userQuery, currentRecipeJsonString, userPreferences, chefPreamble) {
+function buildCurrentUserTurnContextualPrompt(userQuery, currentRecipeJsonString, userPreferences, chefPreamble, userIngredients = null) {
     let promptSections = [];
     const standardChefPreamble = config.CHEF_PERSONALITY_PROMPTS.standard || "You are a helpful, expert, and friendly cooking assistant.";
 
@@ -64,6 +65,28 @@ function buildCurrentUserTurnContextualPrompt(userQuery, currentRecipeJsonString
       promptSections.push("```json\n" + currentRecipeJsonString + "\n```");
     }
 
+    // Add ingredient context
+    if (userIngredients && userIngredients.ingredients && Array.isArray(userIngredients.ingredients) && userIngredients.ingredients.length > 0) {
+      const ingredientsByLocation = {};
+      userIngredients.ingredients.forEach(ingredient => {
+        if (!ingredientsByLocation[ingredient.location]) {
+          ingredientsByLocation[ingredient.location] = [];
+        }
+        const ingredientText = ingredient.quantity ? `${ingredient.name} (${ingredient.quantity})` : ingredient.name;
+        ingredientsByLocation[ingredient.location].push(ingredientText);
+      });
+
+      let ingredientsContext = "\nUser's Available Ingredients:";
+      Object.entries(ingredientsByLocation).forEach(([location, ingredients]) => {
+        const locationDisplay = location.charAt(0).toUpperCase() + location.slice(1);
+        ingredientsContext += `\n- ${locationDisplay}: ${ingredients.join(', ')}`;
+      });
+      
+      ingredientsContext += `\n\nIMPORTANT: When suggesting recipes, prioritize ingredients the user already has. If the recipe requires ingredients they don't have, suggest substitutions using their available ingredients or mention which ingredients they'd need to buy.`;
+      
+      promptSections.push(ingredientsContext);
+    }
+
     if (userPreferences) {
       let preferencesText = "";
       if (Array.isArray(userPreferences.selected_filters) && userPreferences.selected_filters.length) {
@@ -84,10 +107,10 @@ function buildCurrentUserTurnContextualPrompt(userQuery, currentRecipeJsonString
 }
 
 
-async function getRecipeFromTextChat(userQuery, currentRecipeJsonString, userPreferences, chatHistory = [], chefPreambleString = config.CHEF_PERSONALITY_PROMPTS.standard) {
+async function getRecipeFromTextChat(userQuery, currentRecipeJsonString, userPreferences, chatHistory = [], chefPreambleString = config.CHEF_PERSONALITY_PROMPTS.standard, userIngredients = null) {
     await recipeServiceModelsInitPromise;
 
-    const currentUserTurnPromptText = buildCurrentUserTurnContextualPrompt(userQuery, currentRecipeJsonString, userPreferences, chefPreambleString);
+    const currentUserTurnPromptText = buildCurrentUserTurnContextualPrompt(userQuery, currentRecipeJsonString, userPreferences, chefPreambleString, userIngredients);
     const formattedApiHistory = chatHistory.map(msg => ({
         role: msg.role,
         parts: msg.parts.map(p => ({ text: p.text }))
@@ -122,6 +145,12 @@ async function getRecipeFromTextChat(userQuery, currentRecipeJsonString, userPre
 async function getRecipeFromImage(imageDataBase64, imageMimeType, userQuery, chefPreambleString = config.CHEF_PERSONALITY_PROMPTS.standard) {
     await recipeServiceModelsInitPromise;
 
+    // Use shared image processor for validation and preparation
+    const imageProcessingResult = imageProcessor.prepareImageForGemini(imageDataBase64, imageMimeType);
+    if (imageProcessingResult.error) {
+        throw new Error(`Image processing failed: ${imageProcessingResult.error}`);
+    }
+
     const systemPromptText = config.DETAILED_RECIPE_JSON_SCHEMA_PROMPT.system;
     const standardChefPreamble = config.CHEF_PERSONALITY_PROMPTS.standard || "You are a helpful, expert, and friendly cooking assistant.";
     let personalityInstruction = "";
@@ -147,7 +176,7 @@ After you output the JSON, re-print it in a fenced code block and append on a ne
 
     const visionUserQueryParts = [
         { text: userInstructionSegment },
-        { inlineData: { mimeType: imageMimeType, data: imageDataBase64 } }
+        imageProcessingResult.geminiFormat
     ];
     
     console.log(`Recipe Gemini Service (Vision): Processing image. Using model ${config.GEMINI_VISION_MODEL_NAME}.`);

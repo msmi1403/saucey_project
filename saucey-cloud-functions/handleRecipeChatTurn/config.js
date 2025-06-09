@@ -32,7 +32,6 @@ const RECIPES_SUBCOLLECTION = process.env.RECIPES_SUBCOLLECTION || 'my_recipes';
 // If handleRecipeChatTurn has different CORS needs, define them here. For this example, we'll assume
 // the CORS_HEADERS from globalConfig are used (they will be available via the ...globalConfig spread).
 
-const MAX_IMAGE_UPLOAD_SIZE_BYTES = parseInt(process.env.MAX_IMAGE_UPLOAD_SIZE_BYTES, 10) || 10 * 1024 * 1024; // 10MB limit
 const URL_FETCH_TIMEOUT_MS = parseInt(process.env.URL_FETCH_TIMEOUT_MS, 10) || 15000; // 15 seconds
 
 // --- Function Runtime Options (Gen 2) ---
@@ -42,6 +41,7 @@ const TIMEOUT_SECONDS = parseInt(process.env.FUNCTION_TIMEOUT_SECONDS, 10) || 30
 const MIN_INSTANCES = parseInt(process.env.FUNCTION_MIN_INSTANCES, 10) || 0; // Default min instances
 
 // --- Supported Types (Specific to handleRecipeChatTurn) ---
+// Note: Image size and base MIME types now come from globalConfig, but we keep recipe-specific ones here
 const SUPPORTED_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
 
 // Kept for potential other uses or legacy
@@ -72,7 +72,6 @@ module.exports = {
   DEFAULT_INGREDIENT_NAME,
   DEFAULT_INGREDIENT_CATEGORY,
   UNKNOWN_STEP_TEXT,
-  MAX_IMAGE_UPLOAD_SIZE_BYTES,
   URL_FETCH_TIMEOUT_MS,
   SUPPORTED_IMAGE_MIME_TYPES,
   USERS_COLLECTION,

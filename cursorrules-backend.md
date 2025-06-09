@@ -14,6 +14,8 @@ When generating or modifying code, follow these conventions strictly. This file 
 - Avoid hardcoding secrets. Never do this
 - NEVER use placeholder text or code
 
+### 🎯 Overarching Agent Directives
+- **Simplicity & Elegance**: Before finalizing any code, the agent should ask, “Is there a simpler, more standardized way to achieve this?” and favor solutions that minimize complexity, avoid duplication, and leverage existing abstractions.
 
 
 ## 🔧 General Project Rules

@@ -9,6 +9,43 @@ const { generateUniqueId } = require('@saucey/shared/utils/commonUtils.js');
 const config = require('../config');
 
 /**
+ * Validates an imageURL to ensure it's a proper HTTP/HTTPS URL
+ * @param {string|null} imageUrl - The URL to validate
+ * @returns {string|null} - Valid URL or null
+ */
+function validateImageURL(imageUrl) {
+    if (!imageUrl || typeof imageUrl !== 'string') {
+        return null;
+    }
+    
+    const trimmed = imageUrl.trim();
+    if (!trimmed) {
+        return null;
+    }
+    
+    // Reject obvious descriptive text
+    if (trimmed.toLowerCase().includes('image of') || 
+        trimmed.toLowerCase().includes('photo of') || 
+        trimmed.toLowerCase().includes('picture of') ||
+        trimmed.includes(' ') && !trimmed.includes('://')) {
+        console.log(`validateImageURL: Rejecting descriptive text: "${trimmed}"`);
+        return null;
+    }
+    
+    try {
+        const url = new URL(trimmed);
+        if (url.protocol === 'http:' || url.protocol === 'https:') {
+            return trimmed;
+        }
+    } catch (e) {
+        // Invalid URL
+    }
+    
+    console.log(`validateImageURL: Rejecting invalid URL: "${trimmed}"`);
+    return null;
+}
+
+/**
  * Fetches a recipe from a URL, normalizes it, and then uses Gemini
  * to re-structure and potentially modify it according to the user's prompt
  * and the application's detailed JSON schema.
@@ -92,6 +129,8 @@ async function processUrlInput(sourceUrl, userPrompt = null, userId, preferredCh
             let finalRecipe = { ...geminiResult };
             finalRecipe.recipeId = finalRecipe.recipeId || (recipeToProcess ? recipeToProcess.recipeId : null) || generateUniqueId();
             finalRecipe.title = finalRecipe.title || (recipeToProcess ? recipeToProcess.name : null) || config.DEFAULT_RECIPE_TITLE;
+            // Validate imageURL to ensure it's a real URL, not descriptive text
+            finalRecipe.imageURL = validateImageURL(finalRecipe.imageURL);
             
             console.log(`urlProcessor: Gemini (from ${processingSource}) processed URL content into schema-compliant recipe: ${finalRecipe.title}`);
             return {

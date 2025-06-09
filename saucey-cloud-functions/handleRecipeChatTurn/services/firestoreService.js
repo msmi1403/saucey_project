@@ -128,10 +128,39 @@ async function getChatHistory(userId, chatId, limit = 10) {
     }
 }
 
+/**
+ * Fetches user's available ingredients from their ingredients subcollection.
+ * @param {string} userId - The ID of the user.
+ * @returns {Promise<object|null>} User ingredients object or null if not found.
+ */
+async function getUserIngredients(userId) {
+    if (!userId) {
+        console.warn("getUserIngredients called without userId.");
+        return null;
+    }
+    try {
+        const collectionPath = `${config.USERS_COLLECTION}/${userId}/ingredients`;
+        const ingredientsDoc = await firestoreHelper.getDocument(collectionPath, 'current');
+        
+        if (!ingredientsDoc) {
+            console.log(`No ingredients found for user ${userId}`);
+            return null;
+        }
+        
+        console.log(`Fetched ingredients for user ${userId}: ${ingredientsDoc.ingredients?.length || 0} items`);
+        return ingredientsDoc;
+    } catch (error) {
+        console.error(`Error fetching ingredients for user ${userId}:`, error);
+        // Don't throw critical error for this, as it's supplementary
+        return null;
+    }
+}
+
 module.exports = {
     saveOrUpdateUserRecipe,
     getUserRecipe,
     getUserPreferences,
     saveChatMessage,
     getChatHistory,
+    getUserIngredients,
 };

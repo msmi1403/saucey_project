@@ -6,6 +6,43 @@ const { generateUniqueId } = require('@saucey/shared/utils/commonUtils.js');
 const config = require('../config');
 
 /**
+ * Validates an imageURL to ensure it's a proper HTTP/HTTPS URL
+ * @param {string|null} imageUrl - The URL to validate
+ * @returns {string|null} - Valid URL or null
+ */
+function validateImageURL(imageUrl) {
+    if (!imageUrl || typeof imageUrl !== 'string') {
+        return null;
+    }
+    
+    const trimmed = imageUrl.trim();
+    if (!trimmed) {
+        return null;
+    }
+    
+    // Reject obvious descriptive text
+    if (trimmed.toLowerCase().includes('image of') || 
+        trimmed.toLowerCase().includes('photo of') || 
+        trimmed.toLowerCase().includes('picture of') ||
+        trimmed.includes(' ') && !trimmed.includes('://')) {
+        console.log(`validateImageURL: Rejecting descriptive text: "${trimmed}"`);
+        return null;
+    }
+    
+    try {
+        const url = new URL(trimmed);
+        if (url.protocol === 'http:' || url.protocol === 'https:') {
+            return trimmed;
+        }
+    } catch (e) {
+        // Invalid URL
+    }
+    
+    console.log(`validateImageURL: Rejecting invalid URL: "${trimmed}"`);
+    return null;
+}
+
+/**
  * Processes a textual interaction.
  *
  * @param {string} userPrompt - The user's current text input.
@@ -26,11 +63,20 @@ async function processTextualInteraction(userPrompt, currentRecipeJsonString, us
     }
 
     let userPreferences = null;
+    let userIngredients = null;
+    
     if (responseType !== "titles_only") { // Only fetch preferences if not a titles_only request
         try {
             userPreferences = await firestoreService.getUserPreferences(userId);
         } catch (prefError) {
             console.warn(`Could not fetch user preferences for ${userId}: ${prefError.message}. Proceeding without them.`);
+        }
+        
+        // Fetch user's available ingredients
+        try {
+            userIngredients = await firestoreService.getUserIngredients(userId);
+        } catch (ingredientsError) {
+            console.warn(`Could not fetch user ingredients for ${userId}: ${ingredientsError.message}. Proceeding without them.`);
         }
     }
 
@@ -53,13 +99,14 @@ async function processTextualInteraction(userPrompt, currentRecipeJsonString, us
             }
         }
 
-        // Original logic for full recipe or conversational text, now including chatHistory and chefPreamble
+        // Original logic for full recipe or conversational text, now including chatHistory, chefPreamble, and userIngredients
         const geminiResponse = await geminiService.getRecipeFromTextChat(
             userPrompt,
             currentRecipeJsonString,
             userPreferences,
             chatHistory, // Pass chatHistory to Gemini service
-            chefPreamble // Pass the selected chefPreamble
+            chefPreamble, // Pass the selected chefPreamble
+            userIngredients // Pass user's available ingredients
         );
 
         if (geminiResponse && geminiResponse.conversationalText && Object.keys(geminiResponse).length === 1 && !geminiResponse.recipeId) {
@@ -103,7 +150,8 @@ async function processTextualInteraction(userPrompt, currentRecipeJsonString, us
             recipeData.calories = recipeData.calories || null;
             recipeData.tipsAndVariations = recipeData.tipsAndVariations || [];
             recipeData.keywords = recipeData.keywords || [];
-            recipeData.imageURL = recipeData.imageURL || null; // Gemini might provide this based on schema
+            // Validate imageURL to ensure it's a real URL, not descriptive text
+            recipeData.imageURL = validateImageURL(recipeData.imageURL);
             recipeData.isPublic = typeof recipeData.isPublic === 'boolean' ? recipeData.isPublic : false;
             recipeData.isSecretRecipe = typeof recipeData.isSecretRecipe === 'boolean' ? recipeData.isSecretRecipe : false;
 

@@ -4,22 +4,30 @@ const geminiService = require('../services/geminiService');
 const { isValidImageMimeTypeForRecipes } = require('../recipeUtils'); // For recipe-specific MIME validation
 const { generateUniqueId } = require('../../shared/utils/commonUtils');
 const config = require('../config'); // Require config to access CHEF_PERSONALITY_PROMPTS
+const sharedImageProcessor = require('../../shared/services/imageProcessor');
+
+// Use shared validateImageURL function
+const validateImageURL = sharedImageProcessor.validateImageURL;
 
 /**
  * Processes an image input (as base64) along with a user prompt.
  * Sends the image data directly to Gemini Vision for analysis/recipe generation.
  */
 async function processImageInput(imageDataBase64, imageMimeType, userPrompt, userId, currentRecipeJsonString, preferredChefPersonalityKey = 'standard') { // MODIFIED: Added preferredChefPersonalityKey
-    if (!imageDataBase64 || !imageMimeType) {
-        return { error: "Image data or MIME type missing.", requiresSaving: false };
-    }
-    if (!isValidImageMimeTypeForRecipes(imageMimeType)) {
-        return { error: `Invalid image MIME type: ${imageMimeType}. Supported: ${config.SUPPORTED_IMAGE_MIME_TYPES.join(', ')}`, requiresSaving: false };
+    // Use shared image processor for validation (but keep recipe-specific MIME type check)
+    const imageProcessingResult = sharedImageProcessor.processImageInput(
+        imageDataBase64, 
+        imageMimeType, 
+        'handleRecipeChatTurn'
+    );
+    
+    if (!imageProcessingResult.success) {
+        return { error: imageProcessingResult.error, requiresSaving: false };
     }
 
-    const imageBuffer = Buffer.from(imageDataBase64, 'base64');
-    if (imageBuffer.length > config.MAX_IMAGE_UPLOAD_SIZE_BYTES) {
-        return { error: `Image size too large (max ${config.MAX_IMAGE_UPLOAD_SIZE_BYTES / (1024 * 1024)}MB).`, requiresSaving: false };
+    // Additional recipe-specific MIME type validation
+    if (!isValidImageMimeTypeForRecipes(imageMimeType)) {
+        return { error: `Invalid image MIME type for recipes: ${imageMimeType}. Supported: ${config.SUPPORTED_IMAGE_MIME_TYPES.join(', ')}`, requiresSaving: false };
     }
 
     try {
@@ -64,6 +72,8 @@ async function processImageInput(imageDataBase64, imageMimeType, userPrompt, use
             recipeData.calories = recipeData.calories || null;
             recipeData.tipsAndVariations = recipeData.tipsAndVariations || [];
             recipeData.keywords = recipeData.keywords || [];
+            // Validate imageURL to ensure it's a real URL, not descriptive text
+            recipeData.imageURL = validateImageURL(recipeData.imageURL);
             recipeData.isPublic = typeof recipeData.isPublic === 'boolean' ? recipeData.isPublic : false;
             recipeData.isSecretRecipe = typeof recipeData.isSecretRecipe === 'boolean' ? recipeData.isSecretRecipe : false;
 
