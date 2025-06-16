@@ -1,4 +1,8 @@
 // In saucey-cloud-functions/shared/middleware/authMiddleware.js
+// 
+// DEPRECATED: This middleware is no longer needed as functions have been converted to onCall
+// which provides built-in authentication. This file can be removed once all functions
+// have been migrated away from onRequest pattern.
 
 const admin = require('firebase-admin');
 

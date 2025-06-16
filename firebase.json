@@ -16,7 +16,7 @@
     }
   ],
   "firestore": {
-    "rules": "firestore.rules.local",
+    "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
   "emulators": {

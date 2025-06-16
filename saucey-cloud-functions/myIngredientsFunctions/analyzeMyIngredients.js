@@ -1,124 +1,118 @@
-const { onRequest } = require("firebase-functions/v2/https");
+const { onCall } = require("firebase-functions/v2/https");
 const { logger } = require("firebase-functions/v2");
-const { authenticateFirebaseToken } = require('../shared/middleware/authMiddleware');
 const geminiService = require('./services/geminiIngredientsService');
 const imageProcessor = require('../shared/services/imageProcessor');
 
-const analyzeMyIngredients = onRequest(async (req, res) => {
-    // CORS headers
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    
-    if (req.method === 'OPTIONS') {
-        res.status(204).send('');
-        return;
-    }
+const analyzeMyIngredients = onCall(async (request) => {
     
     try {
-        // Authenticate user
-        await new Promise((resolve, reject) => {
-            authenticateFirebaseToken(req, res, (err) => {
-                if (err) {
-                    logger.warn("Auth failed for analyzeMyIngredients", { error: err?.message });
-                    return reject(new Error('Authentication failed'));
-                }
-                if (!req.userId) {
-                    logger.error('Auth succeeded but userId missing in analyzeMyIngredients');
-                    return reject(new Error('User ID missing'));
-                }
-                resolve();
-            });
-        });
+        // Get authenticated user from callable function context
+        if (!request.auth) {
+            throw new Error('Authentication required');
+        }
         
-        const userId = req.userId;
-        
-        // Firebase Functions HTTP calls wrap data in req.body.data
-        const requestData = req.body.data || req.body;
+        const userId = request.auth.uid;
+        const requestData = request.data;
         
         logger.info(`Request data received:`, {
             userId,
-            hasData: !!req.body.data,
             dataKeys: Object.keys(requestData || {}),
             hasImageData: !!(requestData && requestData.imageDataBase64),
             hasImageMimeType: !!(requestData && requestData.imageMimeType),
+            hasTextInput: !!(requestData && requestData.textInput),
+            hasExistingIngredients: !!(requestData && requestData.existingIngredients),
             imageMimeType: requestData ? requestData.imageMimeType : 'MISSING_DATA'
         });
         
-        const { imageDataBase64, imageMimeType, location, hasAnnotation } = requestData;
-        
-        // Validate and process image using shared service
-        const imageProcessingResult = imageProcessor.processImageInput(
+        const { 
             imageDataBase64, 
             imageMimeType, 
-            'analyzeMyIngredients'
-        );
+            textInput,
+            location, 
+            hasAnnotation,
+            existingIngredients
+        } = requestData;
         
-        if (!imageProcessingResult.success) {
-            return res.status(400).json({ 
-                error: imageProcessingResult.error 
-            });
+        // Validate inputs - at least one input method required
+        if (!imageDataBase64 && !textInput) {
+            throw new Error('Either image data or text input is required');
+        }
+
+        // Validate existing ingredients structure if provided
+        if (existingIngredients && !Array.isArray(existingIngredients)) {
+            throw new Error('existingIngredients must be an array');
+        }
+
+        // Validate existing ingredients have required fields
+        if (existingIngredients && existingIngredients.length > 0) {
+            const invalidIngredient = existingIngredients.find(ing => 
+                !ing.name || typeof ing.name !== 'string' || 
+                !ing.location || typeof ing.location !== 'string'
+            );
+            if (invalidIngredient) {
+                throw new Error('Invalid existing ingredient structure: missing name or location');
+            }
+        }
+        
+        // Validate and process image if provided
+        if (imageDataBase64) {
+            const imageProcessingResult = imageProcessor.processImageInput(
+                imageDataBase64, 
+                imageMimeType, 
+                'analyzeMyIngredients'
+            );
+            
+            if (!imageProcessingResult.success) {
+                throw new Error(imageProcessingResult.error);
+            }
         }
         
         // Validate location
         const validLocations = ['fridge', 'pantry', 'freezer', 'other'];
         if (location && !validLocations.includes(location)) {
-            return res.status(400).json({ 
-                error: `Invalid location. Valid options: ${validLocations.join(', ')}` 
-            });
+            throw new Error(`Invalid location. Valid options: ${validLocations.join(', ')}`);
         }
         
-        logger.info(`Analyzing ingredients image for user ${userId}`, {
+        const finalLocation = location || 'fridge';
+        
+        logger.info(`Analyzing ingredients for user ${userId} (smart merge)`, {
             userId,
-            location: location || 'unspecified',
+            location: finalLocation,
             hasAnnotation: hasAnnotation || false,
-            imageSize: imageProcessingResult.buffer.length
+            hasImage: !!imageDataBase64,
+            hasText: !!textInput,
+            existingIngredientsCount: existingIngredients ? existingIngredients.length : 0
         });
         
-        // Analyze image with Gemini
-        const analysisResult = await geminiService.analyzeIngredientsImage(
+        // Always use smart merge analysis (handles empty existing ingredients gracefully)
+        const analysisResult = await geminiService.analyzeIngredientsWithSmartMerge(
             imageDataBase64,
             imageMimeType,
-            location || 'fridge',
-            hasAnnotation || false
+            textInput,
+            finalLocation,
+            existingIngredients || [] // Always pass existing ingredients array (can be empty)
         );
         
         logger.info(`Successfully analyzed ingredients for user ${userId}`, {
             userId,
-            detectedCount: analysisResult.detectedIngredients.length,
-            confidence: analysisResult.confidence
+            detectedCount: analysisResult.detectedIngredients ? analysisResult.detectedIngredients.length : 0,
+            confidence: analysisResult.confidence,
+            mergeStrategy: analysisResult.mergeStrategy || 'smart_merge',
+            needsUserReview: analysisResult.needsUserReview || false
         });
         
-        // Wrap response in data field for Firebase Functions SDK compatibility
-        return res.status(200).json({
-            data: analysisResult
-        });
+        // Return analysis result - callable functions automatically wrap it properly
+        return analysisResult;
         
     } catch (error) {
-        // Check if it's an authentication error
-        if (error.message === 'Authentication failed' || error.message === 'User ID missing') {
-            logger.warn("Authentication error in analyzeMyIngredients", { 
-                error: error.message 
-            });
-            if (!res.headersSent) {
-                return res.status(401).json({ error: 'Authentication failed' });
-            }
-            return;
-        }
-        
-        // General error handling
         logger.error("Error in analyzeMyIngredients", { 
             error: error.message, 
             stack: error.stack,
-            userId: req.userId 
+            userId: userId || 'unknown'
         });
         
-        if (!res.headersSent) {
-            return res.status(500).json({ 
-                error: 'Failed to analyze ingredients',
-                details: error.message 
-            });
-        }
+        // Re-throw for Firebase Functions to handle properly
+        throw error;
     }
 });
 

@@ -1,30 +1,28 @@
 // triggers/authTriggers.js
-const functions = require("firebase-functions");   // v6.x (still installed in package.json)
-const admin     = require("firebase-admin");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { logger } = require("firebase-functions/v2");
+const admin = require("firebase-admin");
 
 const db = admin.firestore();
 
 /**
- * HTTPS Endpoint: createDefaultChapters
- * Expects a POST payload { uid: "<newUserUid>" }.
+ * Callable Function: createDefaultChapters
+ * Creates default chapters for the authenticated user.
  * Call this from your client immediately after you complete sign-up.
+ * User authentication is required - UID is automatically derived from the authenticated token.
  */
-exports.createDefaultChapters = functions.https.onRequest(async (req, res) => {
-  // Only allow POST
-  if (req.method !== "POST") {
-    res.status(405).send("Method Not Allowed");
-    return;
+exports.createDefaultChapters = onCall(async (request) => {
+  // Add authentication check
+  if (!request.auth) {
+    logger.warn("createDefaultChapters: Unauthenticated access attempt");
+    throw new HttpsError("unauthenticated", "The function must be called while authenticated.");
   }
 
-  const uid = req.body.uid;
-  if (typeof uid !== "string" || !uid.match(/^.{20,}$/)) {
-    res.status(400).send("Invalid or missing UID");
-    return;
-  }
-
+  // Use authenticated user's UID
+  const uid = request.auth.uid;
   const logPrefix = `createDefaultChapters[User:${uid}]`;
 
-  functions.logger.log(`${logPrefix}: received request.`);
+  logger.info(`${logPrefix}: Creating chapters for authenticated user: ${uid}`);
 
   const defaultChapter = {
     name:        "Favorites",
@@ -42,10 +40,10 @@ exports.createDefaultChapters = functions.https.onRequest(async (req, res) => {
       .collection("chapters");
 
     await chaptersRef.doc().set(defaultChapter);
-    functions.logger.log(`${logPrefix}: successfully created default chapter.`);
-    res.status(200).send({ success: true });
+    logger.info(`${logPrefix}: successfully created default chapter.`);
+    return { success: true };
   } catch (err) {
-    functions.logger.error(`${logPrefix}: error creating chapter:`, err);
-    res.status(500).send({ error: err.message });
+    logger.error(`${logPrefix}: error creating chapter:`, err);
+    throw new HttpsError("internal", "Failed to create default chapters", err.message);
   }
 });

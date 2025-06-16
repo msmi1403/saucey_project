@@ -1,10 +1,11 @@
-// saucey-cloud-functions/handleRecipeChatTurn/commonutils.js (or recipeUtils.js)
+// saucey-cloud-functions/handleRecipeChatTurn/recipeUtils.js
 const config = require('./config');
-const sharedCommonUtils = require('../shared/utils/commonUtils'); // Path to the new shared utils
+const sharedCommonUtils = require('../shared/utils/commonUtils');
+const sharedImageProcessor = require('../shared/services/imageProcessor');
 
-// This function is now specific to validating image types FOR RECIPES
+// Use shared image validation - just check if mime type is in our supported list
 function isValidImageMimeTypeForRecipes(mimeType) {
-    return sharedCommonUtils.isValidMimeType(mimeType, config.SUPPORTED_IMAGE_MIME_TYPES);
+    return config.SUPPORTED_IMAGE_MIME_TYPES.includes(mimeType);
 }
 
 /**

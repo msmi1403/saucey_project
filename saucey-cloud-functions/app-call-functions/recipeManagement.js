@@ -1,6 +1,8 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const { logger } = require("firebase-functions/v2"); // Use Gen 2 logger
+// Import the recipe parsing service
+const { parseRecipeText } = require('../handleRecipeChatTurn/services/recipeParsingService');
 // Assuming admin is initialized in a shared file, e.g., ../shared/firebaseAdmin.js
 // If not, you might need:
 // admin.initializeApp(); 
@@ -121,6 +123,100 @@ const unpublishPublicRecipe = onCall(async (request) => {
   }
 });
 
+/**
+ * Parses conversational recipe text into structured JSON format for saving to cookbook
+ */
+const parseRecipeForCookbook = onCall(async (request) => {
+  const logPrefix = "parseRecipeForCookbook:";
+
+  // 1. Check authentication
+  if (!request.auth) {
+    logger.error(`${logPrefix} Authentication required.`);
+    throw new HttpsError(
+      "unauthenticated", 
+      "The function must be called while authenticated."
+    );
+  }
+
+  const userId = request.auth.uid;
+  const { recipeText } = request.data;
+
+  // 2. Validate input
+  if (!recipeText || typeof recipeText !== "string" || recipeText.trim().length === 0) {
+    logger.error(`${logPrefix} Invalid recipeText provided.`, { recipeText });
+    throw new HttpsError(
+      "invalid-argument",
+      "The function must be called with valid 'recipeText' string."
+    );
+  }
+
+  if (recipeText.length > 10000) {
+    logger.error(`${logPrefix} Recipe text too long: ${recipeText.length} characters.`);
+    throw new HttpsError(
+      "invalid-argument", 
+      "Recipe text is too long. Maximum 10,000 characters allowed."
+    );
+  }
+
+  logger.info(`${logPrefix} User ${userId} parsing recipe text of ${recipeText.length} characters.`);
+
+  try {
+    // 3. Get user preferences for context
+    let userPreferences = null;
+    try {
+      const userDoc = await db.collection('users').doc(userId).get();
+      if (userDoc.exists) {
+        const userData = userDoc.data();
+        userPreferences = {
+          difficulty: userData.preferredRecipeDifficulty || 'medium',
+          allergensToAvoid: userData.allergensToAvoid || [],
+          dietaryPreferences: userData.dietaryPreferences || [],
+          customDietaryNotes: userData.customDietaryNotes || '',
+          preferredCookTimePreference: userData.preferredCookTimePreference || '',
+        };
+      }
+    } catch (prefError) {
+      logger.warn(`${logPrefix} Could not fetch user preferences for ${userId}: ${prefError.message}`);
+    }
+
+    // 4. Parse the recipe text using the existing service
+    const parsedRecipe = await parseRecipeText(recipeText, userPreferences);
+
+    // 5. Add metadata for cookbook saving
+    parsedRecipe.createdByUserId = userId;
+    parsedRecipe.createdAt = admin.firestore.FieldValue.serverTimestamp();
+    parsedRecipe.source = 'generated_chat_saved';
+    parsedRecipe.isPublic = false;
+    parsedRecipe.isSecretRecipe = false;
+
+    logger.info(`${logPrefix} Successfully parsed recipe: ${parsedRecipe.title} for user ${userId}`);
+
+    return {
+      success: true,
+      recipe: parsedRecipe,
+      message: "Recipe parsed successfully"
+    };
+
+  } catch (error) {
+    logger.error(`${logPrefix} Error parsing recipe text for user ${userId}:`, {
+      error: error.message,
+      stack: error.stack,
+      recipeTextLength: recipeText.length
+    });
+
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+
+    throw new HttpsError(
+      "internal",
+      "Failed to parse recipe. Please try again or check if the text contains a complete recipe.",
+      error.message
+    );
+  }
+});
+
 module.exports = {
     unpublishPublicRecipe,
+    parseRecipeForCookbook,
 }; 

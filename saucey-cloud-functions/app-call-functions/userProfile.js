@@ -66,13 +66,19 @@ const getUserAveragePublicRating = onCall(async (request) => {
 });
 
 /**
- * Fetches data for a creator's profile page, including their profile info
- * and categorized public recipes.
- * Can be called unauthenticated.
+ * Fetches public creator profile data for viewing creator profiles.
+ * 
+ * SECURITY NOTE: This function intentionally allows unauthenticated access
+ * to support public profile viewing. Only public data is returned.
+ * Authentication is optional - when provided, it may enable enhanced features
+ * for logged-in users in the future.
+ * 
+ * @param {object} request.data.profileOwnerId - The user ID whose profile to fetch
+ * @returns {object} Public profile data and categorized public recipes
  */
 const getCreatorProfileData = onCall(async (request) => {
     const profileOwnerId = request.data.profileOwnerId;
-    const callerUid = request.auth ? request.auth.uid : null; // Can be called unauthenticated
+    const callerUid = request.auth ? request.auth.uid : null; // Optional authentication for public profile viewing
     const logPrefix = "getCreatorProfileData:"; // Standardized prefix
 
     if (!profileOwnerId || typeof profileOwnerId !== "string") {

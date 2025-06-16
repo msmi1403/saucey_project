@@ -4,46 +4,16 @@ const { fetchRecipeJsonLd } = require('../utils/fetchRecipeJsonLd');
 const { normalizeRecipe } = require('../utils/normalizerecipe');
 const { extractRelevantTextFromHtmlNode } = require('../utils/htmlTextExtractor');
 const geminiService = require('../services/geminiService');
-const firestoreService = require('../services/firestoreService');
 const { generateUniqueId } = require('@saucey/shared/utils/commonUtils.js');
 const config = require('../config');
+const { getFirestore } = require('firebase-admin/firestore');
 
-/**
- * Validates an imageURL to ensure it's a proper HTTP/HTTPS URL
- * @param {string|null} imageUrl - The URL to validate
- * @returns {string|null} - Valid URL or null
- */
-function validateImageURL(imageUrl) {
-    if (!imageUrl || typeof imageUrl !== 'string') {
-        return null;
-    }
-    
-    const trimmed = imageUrl.trim();
-    if (!trimmed) {
-        return null;
-    }
-    
-    // Reject obvious descriptive text
-    if (trimmed.toLowerCase().includes('image of') || 
-        trimmed.toLowerCase().includes('photo of') || 
-        trimmed.toLowerCase().includes('picture of') ||
-        trimmed.includes(' ') && !trimmed.includes('://')) {
-        console.log(`validateImageURL: Rejecting descriptive text: "${trimmed}"`);
-        return null;
-    }
-    
-    try {
-        const url = new URL(trimmed);
-        if (url.protocol === 'http:' || url.protocol === 'https:') {
-            return trimmed;
-        }
-    } catch (e) {
-        // Invalid URL
-    }
-    
-    console.log(`validateImageURL: Rejecting invalid URL: "${trimmed}"`);
-    return null;
-}
+// Initialize Firestore for direct user preferences access
+const db = getFirestore();
+
+// Import validateImageURL from shared service to avoid duplication
+const sharedImageProcessor = require('../../shared/services/imageProcessor');
+const validateImageURL = sharedImageProcessor.validateImageURL;
 
 /**
  * Fetches a recipe from a URL, normalizes it, and then uses Gemini
@@ -69,9 +39,22 @@ async function processUrlInput(sourceUrl, userPrompt = null, userId, preferredCh
             }
         }
 
+        // Get user preferences directly from Firestore (same logic as index.js)
         let userPreferences = null;
         try {
-            userPreferences = await firestoreService.getUserPreferences(userId);
+            const doc = await db.collection('users').doc(userId).get();
+            if (doc.exists) {
+                const data = doc.data();
+                userPreferences = {
+                    difficulty: data.preferredRecipeDifficulty || 'medium',
+                    allergensToAvoid: data.allergensToAvoid || [],
+                    dietaryPreferences: data.dietaryPreferences || [],
+                    customDietaryNotes: data.customDietaryNotes || '',
+                    preferredCookTimePreference: data.preferredCookTimePreference || '',
+                    preferredChefPersonality: data.preferredChefPersonality || '',
+                    selectedDietaryFilters: data.selectedDietaryFilters || []
+                };
+            }
         } catch (prefError) {
             console.warn(`urlProcessor: Could not fetch user preferences for ${userId}: ${prefError.message}. Proceeding without them.`);
         }
@@ -87,13 +70,13 @@ async function processUrlInput(sourceUrl, userPrompt = null, userId, preferredCh
             }
             effectiveUserQuery += ` (Original source: ${sourceUrl})`;
 
-            geminiResult = await geminiService.getRecipeFromTextChat(
-                effectiveUserQuery,
-                JSON.stringify(recipeToProcess),
-                userPreferences,
-                [], 
-                chefPreamble
-            );
+            geminiResult = await geminiService.getUnifiedChatResponse({
+                userQuery: effectiveUserQuery,
+                currentRecipeJsonString: JSON.stringify(recipeToProcess),
+                userPreferences: userPreferences,
+                chatHistory: [],
+                chefPreambleString: chefPreamble
+            });
         } else if (htmlContent && htmlContent.trim() !== "") {
             // Option 2: No usable JSON-LD, try extracting text from HTML and sending to Gemini
             console.warn(`processUrlInput: No usable JSON-LD found or normalized for ${sourceUrl}. Attempting fallback with cleaned HTML text.`);
@@ -105,12 +88,14 @@ async function processUrlInput(sourceUrl, userPrompt = null, userId, preferredCh
                 throw new Error(`Failed to extract sufficient text content from the URL ${sourceUrl} for recipe generation.`);
             }
 
-            geminiResult = await geminiService.getRecipeFromPageText(
-                cleanedHtmlText,
-                userPrompt, // Pass original user prompt for context
-                sourceUrl,
-                chefPreamble
-            );
+            geminiResult = await geminiService.getUnifiedChatResponse({
+                userQuery: userPrompt || "Please help me with this recipe content",
+                userPreferences: userPreferences,
+                chatHistory: [],
+                chefPreambleString: chefPreamble,
+                scrapedPageContent: cleanedHtmlText,
+                sourceUrl: sourceUrl
+            });
         } else {
             // Option 3: No JSON-LD and no HTML content (should be rare if fetchRecipeJsonLd works correctly)
             console.error(`processUrlInput: No JSON-LD and no HTML content available for ${sourceUrl}. Cannot process.`);

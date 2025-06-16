@@ -1,5 +1,7 @@
 const { logger } = require("firebase-functions/v2");
-const firestoreHelper = require("@saucey/shared/services/firestoreHelper");
+const firestoreHelper = require("./firestoreHelper");
+
+console.log('🧪 SHARED SERVICE TEST: userPreferenceAnalyzer.js loaded at', new Date().toISOString());
 
 /**
  * @fileoverview User Preference Analyzer for generating personalized meal plan preferences
@@ -418,36 +420,151 @@ class UserPreferenceAnalyzer {
 
         // User cooking style
         if (profile.dataQuality.hasGoodData) {
-            sections.push(`This user is a ${profile.cookingPatterns.frequency} frequency cook with ${profile.complexityPreference} complexity preference.`);
+            sections.push(`User cooks ${profile.cookingPatterns.frequency === 'high' ? 'often' : profile.cookingPatterns.frequency === 'low' ? 'occasionally' : 'regularly'} and prefers ${profile.complexityPreference} complexity recipes.`);
         }
 
         // Preferred ingredients
         if (profile.preferredIngredients.length > 0) {
             const topIngredients = profile.preferredIngredients.slice(0, 8).map(i => i.ingredient);
-            sections.push(`Frequently used ingredients: ${topIngredients.join(', ')}.`);
+            sections.push(`Often uses: ${topIngredients.join(', ')}.`);
         }
 
         // Protein preferences
         if (profile.favoriteProteins.length > 0) {
             const topProteins = profile.favoriteProteins.slice(0, 5).map(p => p.protein);
-            sections.push(`Preferred proteins: ${topProteins.join(', ')}.`);
+            sections.push(`Likes ${topProteins.join(', ')}.`);
         }
 
         // Cuisine preferences
         if (profile.cuisineAffinities.length > 0) {
             const topCuisines = profile.cuisineAffinities.slice(0, 4).map(c => c.cuisine);
-            sections.push(`Favored cuisines: ${topCuisines.join(', ')}.`);
+            sections.push(`Enjoys ${topCuisines.join(', ')} flavors.`);
         }
 
         // Recent favorites
         if (profile.recentFavorites.length > 0) {
             const recentTitles = profile.recentFavorites.slice(0, 5).map(r => r.title).filter(Boolean);
             if (recentTitles.length > 0) {
-                sections.push(`Recently engaged with: ${recentTitles.join(', ')}.`);
+                sections.push(`Recently made: ${recentTitles.join(', ')}.`);
             }
         }
 
         return sections.join(' ');
+    }
+
+    /**
+     * Builds ingredient context for AI prompts from user's current kitchen inventory
+     * @param {string} userId - User ID
+     * @returns {Promise<string|null>} Formatted ingredient context or null if no data
+     */
+    async buildIngredientContext(userId) {
+        if (!userId) {
+            logger.warn('UserPreferenceAnalyzer: No userId provided for ingredient context');
+            return null;
+        }
+
+        try {
+            logger.info(`UserPreferenceAnalyzer: Building ingredient context for user ${userId}`);
+            const ingredientsDoc = await this._fetchUserIngredients(userId);
+            if (!ingredientsDoc) {
+                logger.info(`UserPreferenceAnalyzer: No ingredients document found for user ${userId}`);
+                return null; // Silent fallback
+            }
+
+            const { availableSpices, availableSauces, recentIngredients } = this._parseAndFilterIngredients(ingredientsDoc);
+
+            // Return null if no usable ingredients (silent fallback)
+            if (availableSpices.length === 0 && availableSauces.length === 0 && recentIngredients.length === 0) {
+                logger.info(`UserPreferenceAnalyzer: No usable ingredients found for user ${userId}`);
+                return null;
+            }
+
+            const context = this._formatIngredientContextForAI(availableSpices, availableSauces, recentIngredients);
+            logger.info(`UserPreferenceAnalyzer: Built ingredient context for user ${userId}: ${context ? 'success' : 'failed'}`);
+            return context;
+
+        } catch (error) {
+            logger.error('UserPreferenceAnalyzer: Error building ingredient context:', error);
+            return null; // Silent fallback on error
+        }
+    }
+
+    /**
+     * Fetches user ingredients from Firestore
+     * @private
+     */
+    async _fetchUserIngredients(userId) {
+        try {
+            const ingredientsDoc = await firestoreHelper.getDocument(`users/${userId}/ingredients`, 'current');
+            logger.info(`UserPreferenceAnalyzer: Fetched ingredients document for user ${userId}: ${ingredientsDoc ? 'found' : 'not found'}`);
+            
+            if (ingredientsDoc) {
+                logger.info(`UserPreferenceAnalyzer: Document contents - ingredients: ${ingredientsDoc.ingredients?.length || 0}, spices: ${ingredientsDoc.spices?.length || 0}, sauces: ${ingredientsDoc.sauces?.length || 0}`);
+            }
+            
+            return ingredientsDoc;
+        } catch (error) {
+            logger.error(`UserPreferenceAnalyzer: Error fetching ingredients for user ${userId}:`, error);
+            return null;
+        }
+    }
+
+    /**
+     * Parses and filters ingredients based on freshness rules
+     * @private
+     */
+    _parseAndFilterIngredients(ingredientsDoc) {
+        const now = Date.now();
+        const FRESHNESS_THRESHOLD = 21 * 24 * 60 * 60 * 1000; // 3 weeks in milliseconds
+
+        // Check document freshness
+        const lastUpdated = ingredientsDoc.lastUpdated?.toDate?.() || new Date(ingredientsDoc.lastUpdated || 0);
+        const isRecent = (now - lastUpdated.getTime()) < FRESHNESS_THRESHOLD;
+
+        logger.info(`UserPreferenceAnalyzer: Ingredient document age - lastUpdated: ${lastUpdated.toISOString()}, isRecent: ${isRecent}`);
+
+        // Parse available spices/sauces (persistent items)
+        const availableSpices = (ingredientsDoc.spices || [])
+            .filter(item => item.isAvailable === true)
+            .map(item => item.name)
+            .filter(Boolean);
+
+        const availableSauces = (ingredientsDoc.sauces || [])
+            .filter(item => item.isAvailable === true)
+            .map(item => item.name)
+            .filter(Boolean);
+
+        // Parse recent ingredients (consumable items - only if recent)
+        const recentIngredients = isRecent 
+            ? (ingredientsDoc.ingredients || [])
+                .filter(item => item.isAvailable === true)
+                .map(item => item.quantity ? `${item.name} (${item.quantity})` : item.name)
+                .filter(Boolean)
+            : [];
+
+        logger.info(`UserPreferenceAnalyzer: Filtered ingredients - spices: ${availableSpices.length}, sauces: ${availableSauces.length}, recent: ${recentIngredients.length}`);
+
+        return { availableSpices, availableSauces, recentIngredients };
+    }
+
+    /**
+     * Formats ingredient data for AI prompt (Option B format)
+     * @private
+     */
+    _formatIngredientContextForAI(availableSpices, availableSauces, recentIngredients) {
+        const spicesAndCondiments = [...availableSpices, ...availableSauces];
+        
+        let context = "Available in kitchen:\n";
+        
+        if (spicesAndCondiments.length > 0) {
+            context += `Spices & Condiments: ${spicesAndCondiments.join(', ')}\n`;
+        }
+        
+        if (recentIngredients.length > 0) {
+            context += `Fresh Ingredients: ${recentIngredients.join(', ')}\n`;
+        }
+        
+        return context.trim();
     }
 }
 

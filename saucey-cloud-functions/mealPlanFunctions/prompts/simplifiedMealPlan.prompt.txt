@@ -20,6 +20,9 @@ You are an expert meal planning assistant. Generate a complete {{duration}}-day 
 **COOKBOOK RECIPES:**
 {{cookbookContext}}
 
+**KITCHEN INVENTORY:**
+{{ingredientContext}}
+
 **CONSTRAINTS (MUST BE FOLLOWED EXACTLY):**
 {{constraintsContext}}
 

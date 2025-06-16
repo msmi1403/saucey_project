@@ -3,7 +3,7 @@ const { logger } = require("firebase-functions/v2");
 const { HttpsError } = require("firebase-functions/v2/https");
 const geminiClient = require("@saucey/shared/services/geminiClient");
 const globalConfig = require("@saucey/shared/config/globalConfig");
-const { UserPreferenceAnalyzer } = require("../services/userPreferenceAnalyzer");
+const { UserPreferenceAnalyzer } = require("../../shared/services/userPreferenceAnalyzer");
 const { CookbookRecipeSelector } = require("../services/cookbookRecipeSelector");
 const { MealVarietyTracker } = require("../services/mealVarietyTracker");
 const UserPreferenceCacheManager = require("../services/userPreferenceCacheManager");
@@ -124,23 +124,25 @@ async function buildUserContext(userId) {
   const preferenceCache = new UserPreferenceCacheManager();
 
   // Gather all user data in parallel (keep existing smart analysis)
-  const [userProfile, recentMeals, cookbookRecipes] = await Promise.all([
+  const [userProfile, recentMeals, cookbookRecipes, ingredientContext] = await Promise.all([
     preferenceCache.getCachedUserPreferences(
       userId, 
       userPreferenceAnalyzer.generateUserPreferenceProfile.bind(userPreferenceAnalyzer)
     ),
     mealVarietyTracker.getRecentlyUsedRecipes(userId, 4),
-    cookbookRecipeSelector.getUserCookbookRecipes(userId)
+    cookbookRecipeSelector.getUserCookbookRecipes(userId),
+    userPreferenceAnalyzer.buildIngredientContext(userId)
   ]);
 
   logger.info("generateMealPlan: User context built", {
     userId,
     hasUserProfile: !!userProfile,
     recentMealsCount: recentMeals.length,
-    cookbookRecipesCount: cookbookRecipes.length
+    cookbookRecipesCount: cookbookRecipes.length,
+    hasIngredientContext: !!ingredientContext
   });
 
-  return { userProfile, recentMeals, cookbookRecipes };
+  return { userProfile, recentMeals, cookbookRecipes, ingredientContext };
 }
 
 /**
@@ -169,6 +171,10 @@ async function buildMealPlanPrompt(preferences, userContext, startDate) {
   // Add cookbook recipes for prioritization
   const cookbookContext = buildCookbookContext(userContext.cookbookRecipes);
   prompt = prompt.replace('{{cookbookContext}}', cookbookContext);
+
+  // Add ingredient context for kitchen inventory
+  const ingredientContextForPrompt = userContext.ingredientContext || "No current kitchen inventory available.";
+  prompt = prompt.replace('{{ingredientContext}}', ingredientContextForPrompt);
 
   // Add preferences and constraints
   const constraintsContext = buildConstraintsContext(preferences);

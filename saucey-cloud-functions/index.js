@@ -32,8 +32,8 @@ exports.sendDebugNotificationToUser = require("./debugFunctions/sendDebugNotific
 Object.assign(exports, require("./feedbackFunctions/feedbackService"));
 
 // HandleRecipeChatTurn Functions
-// Assuming "./handleRecipeChatTurn" exports handleRecipeChat
-exports.handleRecipeChat = require("./handleRecipeChatTurn").handleRecipeChat;
+// Assuming "./handleRecipeChatTurn" exports handleRecipeChatTurn
+exports.handleRecipeChatTurn = require("./handleRecipeChatTurn").handleRecipeChatTurn;
 
 // App Call Functions
 // Assuming these modules export their functions directly or as a group

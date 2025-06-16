@@ -1,243 +1,291 @@
-// /handleRecipeChatTurn/index.js
-
+const functions = require('firebase-functions');
+const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { initializeApp } = require('firebase-admin/app');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const geminiClient = require('@saucey/shared/services/geminiClient.js');
 const { logger } = require("firebase-functions/v2");
-const { onRequest } = require("firebase-functions/v2/https"); // Gen 2 HTTP import
 const config = require('./config');
-const { authenticateFirebaseToken } = require('@saucey/shared/middleware/authMiddleware.js');
 
-// Note: The './recipeUtils' path suggests generateUniqueId might be local to this package,
-// or it's an alias. If it's from '@saucey/shared', the path should reflect that.
-// However, based on the file structure, it seems generateUniqueId is defined locally in recipeUtils.js
-// and recipeUtils.js also imports from '@saucey/shared/utils/commonUtils.js'.
-const { generateUniqueId } = require('./recipeUtils');
-const textProcessor = require('./processors/textProcessor');
-const imageProcessor = require('./processors/imageProcessor');
-const urlProcessor = require('./processors/urlProcessor');
-const firestoreService = require('./services/firestoreService');
-const { FieldValue } = require('@google-cloud/firestore');
-const geminiService = require('./services/geminiService'); // ADDED: for correction call
+// Initialize Firebase if not already done
+if (!process.env.FIREBASE_CONFIG) {
+    initializeApp();
+}
+const db = getFirestore();
 
-// --- AJV SETUP ---
-const Ajv = require("ajv");
-const addFormats = require("ajv-formats");
-const recipeJsonSchema = require('./prompts/recipeJsonSchema');
+// Import the sophisticated service instead of reimplementing
+const geminiService = require('./services/geminiService');
 
-const ajv = new Ajv({ allErrors: true });
-addFormats(ajv);
-const validateRecipe = ajv.compile(recipeJsonSchema);
-// --- END AJV SETUP ---
-
-// Define the actual function logic
-const handleRecipeChatTurnLogic = async (req, res) => {
-    res.set('Access-Control-Allow-Origin', config.CORS_HEADERS['Access-Control-Allow-Origin']);
-    res.set('Access-Control-Allow-Methods', config.CORS_HEADERS['Access-Control-Allow-Methods']);
-    res.set('Access-Control-Allow-Headers', config.CORS_HEADERS['Access-Control-Allow-Headers']);
-    res.set('Access-Control-Max-Age', config.CORS_HEADERS['Access-Control-Max-Age']);
-
-    if (req.method === 'OPTIONS') {
-        res.status(204).send('');
-        return;
+// Simple function logic
+const handleRecipeChatTurnLogic = async (request) => {
+    // Authentication check
+    if (!request.auth) {
+        logger.warn('handleRecipeChatTurn: Unauthenticated access attempt.');
+        throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
 
-    try {
-        await new Promise((resolve, reject) => {
-            authenticateFirebaseToken(req, res, (err) => {
-                if (err) {
-                    logger.warn("Auth middleware indicated error or sent response.", { error: err ? err.message : "Unknown auth error" });
-                    return reject(new Error('Auth failed and response likely sent.'));
-                }
-                if (!req.userId) {
-                    logger.error('CRITICAL: Auth middleware completed without error but userId not set.');
-                    // Middleware should send the response in this case.
-                    // If not, uncommenting the line below might be necessary, but ideally middleware handles it.
-                    // res.status(500).json({ error: 'Internal authentication configuration error.', status: 'error' });
-                    return reject(new Error('Auth succeeded but userId missing.'));
-                }
-                resolve();
-            });
-        });
-    } catch (authError){
-        logger.warn("Authentication promise rejected, likely response already sent by middleware:", { errorMessage: authError.message });
-        if (!res.headersSent) { // Fallback if middleware failed to send a response
-            res.status(401).json({ error: 'Authentication failed.', status: 'error'});
-        }
-        return;
-    }
-
-    const userId = req.userId;
+    const userId = request.auth.uid;
     const {
-        userPrompt, currentRecipeJSON, imageDataBase64, imageMimeType,
-        sourceUrl, responseType, chatId, preferredChefPersonalityKey
-    } = req.body;
+        userPrompt, 
+        chatId, 
+        preferredChefPersonalityKey,
+        imageDataBase64,
+        imageMimeType,
+        sourceUrl,
+        responseType,
+        currentRecipeJSON,
+        recipeName
+    } = request.data;
 
-    if (!chatId && (userPrompt || imageDataBase64 || sourceUrl)) {
-        logger.error(`Request for user ${userId} missing chatId for an active prompt.`, { userId, hasUserPrompt: !!userPrompt, hasImage: !!imageDataBase64, hasSourceUrl: !!sourceUrl });
-        return res.status(400).json({ error: 'ChatId is required for the conversation.', status: 'error' });
-    }
+    // Basic validation
     if (!userPrompt && !imageDataBase64 && !sourceUrl) {
-        logger.warn(`No input provided for user ${userId}.`, { userId });
-        return res.status(400).json({ error: 'No input provided (userPrompt, imageDataBase64, or sourceUrl is required).', status: 'error' });
+        throw new HttpsError('invalid-argument', 'userPrompt, imageDataBase64, or sourceUrl is required');
     }
-
-    logger.info(`Request received for user ${userId}, chatId: ${chatId || 'N/A'}`, {
-        userId,
-        chatId: chatId || "N/A",
-        promptLength: userPrompt ? userPrompt.length : 0,
-        hasImage: !!imageDataBase64,
-        hasUrl: !!sourceUrl,
-        responseType: responseType || 'default',
-        personalityKey: preferredChefPersonalityKey || 'default'
-    });
-
-    let chatHistory = [];
-    if (userId && chatId) {
-        try {
-            chatHistory = await firestoreService.getChatHistory(userId, chatId, 10);
-            logger.info(`Fetched ${chatHistory.length} messages for chat history.`, { userId, chatId });
-        } catch (historyError) {
-            logger.warn(`Could not fetch chat history for ${chatId}: ${historyError.message}. Proceeding without history.`, { userId, chatId, error: historyError.message });
-        }
+    if (!chatId) {
+        throw new HttpsError('invalid-argument', 'chatId is required');
     }
-
-    let userMessageForHistory;
-    if (userPrompt) {
-        userMessageForHistory = { role: "user", parts: [{ text: userPrompt }], timestamp: FieldValue.serverTimestamp() };
-    } else if (imageDataBase64) {
-        userMessageForHistory = { role: "user", parts: [{ text: "[User uploaded an image]" }], timestamp: FieldValue.serverTimestamp() };
-    } else if (sourceUrl) {
-        userMessageForHistory = { role: "user", parts: [{ text: `[User provided URL: ${sourceUrl}]` }], timestamp: FieldValue.serverTimestamp() };
-    }
-
-    if (userId && chatId && userMessageForHistory) {
-        try {
-            await firestoreService.saveChatMessage(userId, chatId, userMessageForHistory);
-        } catch (saveError) {
-            logger.warn(`Failed to save user's current message to history (chatId: ${chatId}): ${saveError.message}`, { userId, chatId, error: saveError.message });
-        }
-    }
-
-    let processingResult;
-    let finalRecipeToSave = null;
-    let recipeIdForResponse = null;
-    // let isNewRecipeCreation = false; // Declared but not explicitly used for response logic, though logged.
 
     try {
-        if (sourceUrl) {
-            processingResult = await urlProcessor.processUrlInput(sourceUrl, userPrompt, userId, preferredChefPersonalityKey);
-        } else if (imageDataBase64) {
-            processingResult = await imageProcessor.processImageInput(
-                imageDataBase64, imageMimeType, userPrompt, userId, currentRecipeJSON, preferredChefPersonalityKey
-            );
-        } else if (userPrompt) {
-            processingResult = await textProcessor.processTextualInteraction(
-                userPrompt, currentRecipeJSON, userId, responseType, chatHistory, preferredChefPersonalityKey
-            );
-        } else { // Should be caught by earlier check, but as a safeguard
-            if (!res.headersSent) res.status(400).json({ error: 'Invalid request: No actionable input.', status: 'error' });
-            return;
+        // Removed special response type handling - users can ask naturally for what they want
+
+        // Get data we need
+        const [chatHistory, userPreferences] = await Promise.all([
+            getChatHistory(userId, chatId),
+            getUserPreferences(userId)
+        ]);
+
+        // Get ingredient context separately to isolate any errors
+        let ingredientContext = "";
+        try {
+            ingredientContext = await getIngredientContext(userId);
+        } catch (error) {
+            logger.error('Failed to get ingredient context, continuing without it:', { error: error.message, userId });
         }
 
-        if (processingResult.recipe && processingResult.requiresSaving) {
-            let recipeToValidate = processingResult.recipe;
-            let isValidRecipe = validateRecipe(recipeToValidate);
+        // Debug logging
+        logger.info('User preferences fetched:', { userId, userPreferences });
+        logger.info('Ingredient context fetched:', { userId, ingredientContext: ingredientContext ? 'present' : 'empty' });
 
-            if (!isValidRecipe) {
-                logger.warn('Initial AJV Validation Failed for recipe.', { recipeId: recipeToValidate.recipeId, errors: JSON.stringify(validateRecipe.errors, null, 2), userId });
-                try {
-                    const originalUserContext = userPrompt || (sourceUrl ? `Content from URL: ${sourceUrl}` : "Image input provided");
-                    const correctedRecipeObject = await geminiService.correctRecipeJson(
-                        originalUserContext, JSON.stringify(recipeToValidate),
-                        validateRecipe.errors, preferredChefPersonalityKey, chatHistory
-                    );
-                    recipeToValidate = correctedRecipeObject;
-                    isValidRecipe = validateRecipe(recipeToValidate);
-                    if (!isValidRecipe) {
-                        logger.error('AJV Validation Failed EVEN AFTER LLM Correction.', { recipeId: recipeToValidate.recipeId, errors: JSON.stringify(validateRecipe.errors, null, 2), userId });
-                        if (!res.headersSent) res.status(500).json({ error: "Generated recipe failed schema validation even after correction attempt.", details: validateRecipe.errors, status: 'error'});
-                        return;
-                    }
-                    logger.info('AJV Validation Passed after LLM correction for recipe.', { recipeId: recipeToValidate.recipeId, userId });
-                    processingResult.recipe = recipeToValidate; // Ensure processingResult is updated
-                } catch (correctionError) {
-                    logger.error(`Error during LLM correction attempt:`, { error: correctionError.message, stack: correctionError.stack, userId });
-                    if (!res.headersSent) res.status(500).json({ error: "Recipe validation failed and the correction attempt also failed.", details: correctionError.message, status: 'error'});
-                    return;
-                }
-            } else if (processingResult.recipe) { // Ensure recipe exists before logging pass
-                logger.info('Initial AJV Validation Passed for recipe.', { recipeId: recipeToValidate.recipeId || 'new recipe', userId });
-            }
+        // Get chef preamble from config, following same pattern as geminiService
+        // Handle key mapping: client may send different keys than config expects
+        const chefPreamble = config.CHEF_PERSONALITY_PROMPTS[preferredChefPersonalityKey] || 
+                           config.CHEF_PERSONALITY_PROMPTS["Helpful Chef"] || 
+                           "You are a helpful, expert, and friendly cooking assistant.";
 
-            finalRecipeToSave = processingResult.recipe;
-            recipeIdForResponse = finalRecipeToSave.recipeId || generateUniqueId(); // Ensure ID exists
-            finalRecipeToSave.recipeId = recipeIdForResponse; // Standardize ID in the object to save
+        let result;
+        let userMessageForHistory;
 
-            await firestoreService.saveOrUpdateUserRecipe(userId, finalRecipeToSave);
-            logger.info(`Recipe ${recipeIdForResponse} saved to Firestore.`, { userId, recipeId: recipeIdForResponse });
-            // isNewRecipeCreation = processingResult.isNewRecipe || !currentRecipeJSON; // More robust check for new
-            logger.info(`Recipe ID: ${recipeIdForResponse} for user ${userId}. New: ${processingResult.isNewRecipe || !currentRecipeJSON}`, { userId, recipeId: recipeIdForResponse, isNew: (processingResult.isNewRecipe || !currentRecipeJSON) });
-        }
-
-
-        if (userId && chatId && processingResult && !processingResult.error) {
-            let llmMessageForHistory;
-            if (processingResult.recipe) {
-                llmMessageForHistory = { role: "model", parts: [{ text: JSON.stringify(processingResult.recipe) }], timestamp: FieldValue.serverTimestamp() };
-            } else if (processingResult.titles) {
-                llmMessageForHistory = { role: "model", parts: [{ text: `Suggested titles: ${processingResult.titles.join(", ")}` }], timestamp: FieldValue.serverTimestamp() };
-            } else if (processingResult.conversationalText) {
-                llmMessageForHistory = { role: "model", parts: [{ text: processingResult.conversationalText }], timestamp: FieldValue.serverTimestamp() };
-            }
-            if (llmMessageForHistory) {
-                await firestoreService.saveChatMessage(userId, chatId, llmMessageForHistory);
-            }
-        }
-
-        if (processingResult.error) {
-            if (!res.headersSent) res.status(400).json({ error: processingResult.error, status: 'error' });
-        } else if (processingResult.recipe) {
-            if (!res.headersSent) res.status(200).json({ recipe: processingResult.recipe, recipeId: recipeIdForResponse, status: 'success' });
-        } else if (processingResult.titles) {
-            if (!res.headersSent) res.status(200).json({ titles: processingResult.titles, status: 'success' });
-        } else if (processingResult.conversationalText) {
-            if (!res.headersSent) res.status(200).json({ conversationalText: processingResult.conversationalText, currentRecipeJSON, status: 'success'});
+        // Handle different input types with our simplified approach
+        if (imageDataBase64) {
+            userMessageForHistory = { 
+                role: "user", 
+                parts: [{ text: "[User uploaded an image]" }], 
+                timestamp: FieldValue.serverTimestamp() 
+            };
+            // Use unified chat response for image processing
+            result = await geminiService.getUnifiedChatResponse({
+                userQuery: userPrompt,
+                currentRecipeJsonString: currentRecipeJSON,
+                userPreferences: userPreferences,
+                chatHistory: chatHistory,
+                chefPreambleString: chefPreamble,
+                ingredientContext: ingredientContext,
+                imageDataBase64: imageDataBase64,
+                imageMimeType: imageMimeType
+            });
+        } else if (sourceUrl) {
+            userMessageForHistory = { 
+                role: "user", 
+                parts: [{ text: `[User provided URL: ${sourceUrl}]` }], 
+                timestamp: FieldValue.serverTimestamp() 
+            };
+            // Use unified chat response for URL processing
+            result = await geminiService.getUnifiedChatResponse({
+                userQuery: userPrompt || "Please help me with this recipe content",
+                currentRecipeJsonString: currentRecipeJSON,
+                userPreferences: userPreferences,
+                chatHistory: chatHistory,
+                chefPreambleString: chefPreamble,
+                ingredientContext: ingredientContext,
+                scrapedPageContent: `URL content would go here: ${sourceUrl}`, // TODO: Implement actual URL fetching
+                sourceUrl: sourceUrl
+            });
         } else {
-            if (!res.headersSent) res.status(500).json({ error: 'Unknown processing outcome.', status: 'error' });
+            userMessageForHistory = { 
+                role: "user", 
+                parts: [{ text: userPrompt }], 
+                timestamp: FieldValue.serverTimestamp() 
+            };
+            
+            // Use our new unified conversation handler
+            result = await geminiService.getUnifiedChatResponse({
+                userQuery: userPrompt,
+                currentRecipeJsonString: currentRecipeJSON,
+                userPreferences: userPreferences,
+                chatHistory: chatHistory,
+                chefPreambleString: chefPreamble,
+                ingredientContext: ingredientContext
+            });
         }
+
+        // Save user message to history
+        await saveChatMessage(userId, chatId, userMessageForHistory);
+
+        // Simplified response processing
+        logger.info('Processing AI response:', {
+            hasConversationalText: result?.conversationalText ? true : false,
+            hasRecipe: result?.recipe ? true : false
+        });
+        
+        let responseData;
+        let aiMessageText;
+
+        // Handle response formats (much simpler now)
+        if (result.conversationalText) {
+            // Our new natural conversation response
+            responseData = {
+                conversationalText: result.conversationalText,
+                status: 'success'
+            };
+            aiMessageText = result.conversationalText;
+        } else if (result.recipe) {
+            // Legacy recipe response from image/URL processing
+            responseData = {
+                recipe: result.recipe,
+                status: 'success'
+            };
+            aiMessageText = `I've created a recipe for you! It serves ${result.recipe.servings} people. You can ask me questions about this recipe or request modifications.`;
+        } else {
+            // Fallback for any unexpected format
+            logger.warn('Unexpected AI response format:', { 
+                result: JSON.stringify(result).substring(0, 200)
+            });
+            responseData = {
+                conversationalText: "I'm having trouble processing your request. Please try rephrasing or ask me something else!",
+                status: 'success'
+            };
+            aiMessageText = responseData.conversationalText;
+        }
+
+        // Save AI response to history
+        await saveChatMessage(userId, chatId, {
+            role: "model",
+            parts: [{ text: aiMessageText }],
+            timestamp: FieldValue.serverTimestamp()
+        });
+
+        return responseData;
 
     } catch (error) {
-        logger.error('Critical Error in handleRecipeChatTurn processing pipeline:', { errorMessage: error.message, stack: error.stack, userId });
-        if (!res.headersSent) {
-            res.status(500).json({ error: `Internal server error: ${error.message}`, status: 'error' });
-        }
+        logger.error('Error in handleRecipeChatTurn:', { error: error.message, userId });
+        throw new HttpsError('internal', 'Internal server error');
     }
 };
 
-// Register with Functions Framework
-// functions.http('handleRecipeChatTurn', handleRecipeChatTurnLogic);
+// Helper functions - simple and direct
 
-// Export for Firebase Functions (root index.js expects this structure for HTTP functions)
-// The root index.js will wrap this with functions.https.onRequest if it follows typical patterns,
-// or this file itself should define it if it's a Gen 2 HTTP function.
-// Given the existing pattern in root index.js: handleRecipeChat: handleRecipeChatTurnFns.handleRecipeChat,
-// this export is correct. The root index.js is responsible for how it's deployed.
+async function getChatHistory(userId, chatId, limit = 10) {
+    try {
+        const messagesRef = db.collection(`users/${userId}/chats/${chatId}/messages`);
+        const snapshot = await messagesRef.orderBy('timestamp', 'desc').limit(limit).get();
+        
+        const messages = [];
+        snapshot.forEach(doc => {
+            messages.push(doc.data());
+        });
+        
+        return messages.reverse(); // Return in chronological order
+    } catch (error) {
+        logger.error('Error fetching chat history:', { error: error.message, userId, chatId });
+        return [];
+    }
+}
 
-// For Firebase, the actual HTTP trigger is usually defined when exporting, or in the root index.js.
-// If this is intended to be a Firebase HTTP function (Gen1 or Gen2 onRequest):
-// Option 1 (Gen1 style, if root index.js doesn't wrap it):
-// exports.handleRecipeChat = firebaseFunctions.https.onRequest(handleRecipeChatTurnLogic);
-// Option 2 (Gen2 style, if this file defines the full function for deployment):
-// const {onRequest} = require("firebase-functions/v2/https");
-// exports.handleRecipeChat = onRequest(handleRecipeChatTurnLogic);
-// For now, I will keep the export as is, assuming root index.js handles the Firebase wrapper.
+async function saveChatMessage(userId, chatId, message) {
+    try {
+        await db.collection(`users/${userId}/chats/${chatId}/messages`).add(message);
+    } catch (error) {
+        logger.error('Error saving chat message:', { error: error.message, userId, chatId });
+    }
+}
 
-// Gen 2 Export Style
-exports.handleRecipeChat = onRequest(
+async function getUserPreferences(userId) {
+    try {
+        const doc = await db.collection('users').doc(userId).get();
+        if (doc.exists) {
+            const data = doc.data();
+            const preferences = {
+                difficulty: data.preferredRecipeDifficulty || 'medium',
+                allergensToAvoid: data.allergensToAvoid || [],
+                dietaryPreferences: data.dietaryPreferences || [],
+                customDietaryNotes: data.customDietaryNotes || '',
+                preferredCookTimePreference: data.preferredCookTimePreference || '',
+                preferredChefPersonality: data.preferredChefPersonality || '',
+                // Legacy field for backward compatibility
+                selectedDietaryFilters: data.selectedDietaryFilters || []
+            };
+            logger.info(`User preferences raw data for ${userId}:`);
+            logger.info(`- Document keys: ${JSON.stringify(Object.keys(data))}`);
+            logger.info(`- allergensToAvoid: ${JSON.stringify(data.allergensToAvoid)}`);
+            logger.info(`- dietaryPreferences: ${JSON.stringify(data.dietaryPreferences)}`);
+            logger.info(`- preferredRecipeDifficulty: ${JSON.stringify(data.preferredRecipeDifficulty)}`);
+            logger.info(`- customDietaryNotes: ${JSON.stringify(data.customDietaryNotes)}`);
+            logger.info(`- Final preferences object: ${JSON.stringify(preferences)}`);
+            return preferences;
+        } else {
+            logger.warn('User document does not exist:', { userId });
+            return {
+                difficulty: 'medium',
+                allergensToAvoid: [],
+                dietaryPreferences: [],
+                customDietaryNotes: '',
+                preferredCookTimePreference: '',
+                preferredChefPersonality: '',
+                selectedDietaryFilters: []
+            };
+        }
+    } catch (error) {
+        logger.error('Error fetching user preferences:', { error: error.message, userId });
+        return {
+            difficulty: 'medium',
+            allergensToAvoid: [],
+            dietaryPreferences: [],
+            customDietaryNotes: '',
+            preferredCookTimePreference: '',
+            preferredChefPersonality: '',
+            selectedDietaryFilters: []
+        };
+    }
+}
+
+async function getIngredientContext(userId) {
+    try {
+        logger.info(`Attempting to load UserPreferenceAnalyzer for user ${userId}`);
+        const { UserPreferenceAnalyzer } = require('../shared/services/userPreferenceAnalyzer');
+        logger.info('UserPreferenceAnalyzer loaded successfully');
+        
+        const analyzer = new UserPreferenceAnalyzer();
+        logger.info('UserPreferenceAnalyzer instance created');
+        
+        const result = await analyzer.buildIngredientContext(userId);
+        logger.info(`Ingredient context built successfully for ${userId}: ${result ? 'has content' : 'empty'}`);
+        return result;
+    } catch (error) {
+        logger.error(`Error building ingredient context for ${userId}:`);
+        logger.error(`- Error message: ${error.message}`);
+        logger.error(`- Error stack: ${error.stack}`);
+        return ""; // Silent fallback
+    }
+}
+
+
+
+// Export for Firebase Functions
+exports.handleRecipeChatTurn = onCall(
     {
-        region: config.REGION, // Example, ensure these are in your config.js
-        memory: config.MEMORY, // Example
-        timeoutSeconds: config.TIMEOUT_SECONDS, // Example
-        minInstances: config.MIN_INSTANCES, // Example
-        // secrets: [config.GEMINI_API_KEY_SECRET_ID], // If using secrets directly in v2 options
+        region: config.REGION,
+        memory: config.MEMORY,
+        timeoutSeconds: config.TIMEOUT_SECONDS,
+        minInstances: config.MIN_INSTANCES,
     },
     handleRecipeChatTurnLogic
 );

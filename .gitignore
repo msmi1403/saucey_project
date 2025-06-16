@@ -79,5 +79,6 @@ env/
 # macOS
 .DS_Store
 
-# Local Firebase rules file
+# Firebase security rules (keep private)
+firestore.rules
 firestore.rules.local
