@@ -20,27 +20,28 @@ class UserPreferenceAnalyzer {
         
         try {
             // Fetch user data in parallel for efficiency
-            const [cookbookRecipes, recentCookLogs, viewHistory] = await Promise.all([
+            const [cookbookRecipes, recentCookLogs, viewHistory, recipeRatings] = await Promise.all([
                 this.fetchUserCookbookRecipes(userId),
                 this.fetchRecentCookLogs(userId, 30), // Last 30 days
-                this.fetchRecentViewHistory(userId, 50) // Last 50 views
+                this.fetchRecentViewHistory(userId, 50), // Last 50 views
+                this.fetchRecipeRatings(userId) // NEW: Fetch rating data
             ]);
 
-            logger.info(`UserPreferenceAnalyzer: Fetched ${cookbookRecipes.length} cookbook recipes, ${recentCookLogs.length} cook logs, ${viewHistory.length} view history entries`);
+            logger.info(`UserPreferenceAnalyzer: Fetched ${cookbookRecipes.length} cookbook recipes, ${recentCookLogs.length} cook logs, ${viewHistory.length} view history entries, ${recipeRatings.length} ratings`);
 
-            // Generate preference profile
+            // Generate preference profile with balanced approach
             const profile = {
                 userId,
                 generatedAt: Date.now(),
                 
-                // Ingredient preferences from cookbook
-                preferredIngredients: this.extractIngredientPatterns(cookbookRecipes),
+                // Ingredient preferences from cookbook with rating boosts
+                preferredIngredients: this.extractIngredientPatternsWithRatings(cookbookRecipes, recipeRatings),
                 
-                // Protein preferences weighted by recent cooking
-                favoriteProteins: this.analyzeProteinPreferences(cookbookRecipes, recentCookLogs),
+                // Protein preferences weighted by recent cooking + ratings
+                favoriteProteins: this.analyzeProteinPreferencesWithRatings(cookbookRecipes, recentCookLogs, recipeRatings),
                 
-                // Cuisine preferences from bookmarks and views
-                cuisineAffinities: this.rankCuisinePreferences(cookbookRecipes, viewHistory),
+                // Cuisine preferences from bookmarks, views, and ratings
+                cuisineAffinities: this.rankCuisinePreferencesWithRatings(cookbookRecipes, viewHistory, recipeRatings),
                 
                 // Cooking patterns and frequency
                 cookingPatterns: this.analyzeCookingPatterns(recentCookLogs),
@@ -54,11 +55,15 @@ class UserPreferenceAnalyzer {
                 // Seasonal patterns if enough data
                 seasonalPreferences: this.analyzeSeasonalPatterns(recentCookLogs, cookbookRecipes),
                 
+                // NEW: Rating insights for LLM context
+                ratingInsights: this.generateRatingInsights(recipeRatings),
+                
                 // Data freshness indicators
                 dataQuality: {
                     cookbookSize: cookbookRecipes.length,
                     recentActivity: recentCookLogs.length,
                     viewHistorySize: viewHistory.length,
+                    ratingsCount: recipeRatings.length,
                     hasGoodData: cookbookRecipes.length >= 3 || recentCookLogs.length >= 5
                 }
             };
@@ -126,17 +131,45 @@ class UserPreferenceAnalyzer {
     }
 
     /**
-     * Extracts common ingredients from cookbook recipes
+     * Fetches user's recipe ratings from chat interactions
      */
-    extractIngredientPatterns(recipes) {
+    async fetchRecipeRatings(userId) {
+        try {
+            const ratings = await firestoreHelper.getCollection(`users/${userId}/recipe_ratings`, {
+                orderBy: [{ field: "ratedAt", direction: "desc" }],
+                limit: 100
+            });
+            return ratings || [];
+        } catch (error) {
+            logger.warn(`UserPreferenceAnalyzer: Error fetching recipe ratings for ${userId}:`, error);
+            return [];
+        }
+    }
+
+    /**
+     * Extracts common ingredients from cookbook recipes with rating boosts
+     * Balanced approach: All viewed recipes count, liked recipes get modest boost
+     */
+    extractIngredientPatternsWithRatings(recipes, ratings) {
         const ingredientFrequency = new Map();
+        
+        // Create lookup for liked recipes (modest boost, not overweight)
+        const likedRecipeIds = new Set(
+            ratings.filter(r => r.rating === 'liked').map(r => r.recipeId)
+        );
         
         recipes.forEach(recipe => {
             if (recipe.ingredients && Array.isArray(recipe.ingredients)) {
+                // Base weight for all viewed recipes
+                const baseWeight = 1;
+                // Modest boost for liked recipes (not overwhelming)
+                const ratingBoost = likedRecipeIds.has(recipe.recipeId) ? 0.5 : 0;
+                const totalWeight = baseWeight + ratingBoost;
+                
                 recipe.ingredients.forEach(ingredient => {
                     const name = ingredient.item_name?.toLowerCase().trim();
                     if (name && name.length > 2) {
-                        ingredientFrequency.set(name, (ingredientFrequency.get(name) || 0) + 1);
+                        ingredientFrequency.set(name, (ingredientFrequency.get(name) || 0) + totalWeight);
                     }
                 });
             }
@@ -150,31 +183,43 @@ class UserPreferenceAnalyzer {
     }
 
     /**
-     * Analyzes protein preferences with recency weighting
+     * Analyzes protein preferences with ratings and cooking activity
+     * Balanced approach: Views + cooking + rating boosts
      */
-    analyzeProteinPreferences(recipes, cookLogs) {
+    analyzeProteinPreferencesWithRatings(recipes, cookLogs, ratings) {
         const proteinKeywords = ['chicken', 'beef', 'pork', 'fish', 'salmon', 'shrimp', 'tofu', 'turkey', 'lamb'];
         const proteinScores = new Map();
         
-        // Score from cookbook recipes (base preference)
+        // Create lookup for liked recipes
+        const likedRecipeIds = new Set(
+            ratings.filter(r => r.rating === 'liked').map(r => r.recipeId)
+        );
+        
+        // Score from cookbook recipes (base preference from viewing)
         recipes.forEach(recipe => {
             const title = recipe.title?.toLowerCase() || '';
             const ingredients = recipe.ingredients?.map(i => i.item_name?.toLowerCase()).join(' ') || '';
             const content = `${title} ${ingredients}`;
             
+            // Base weight for all viewed recipes
+            const baseWeight = 1;
+            // Modest boost for liked recipes
+            const ratingBoost = likedRecipeIds.has(recipe.recipeId) ? 0.5 : 0;
+            const totalWeight = baseWeight + ratingBoost;
+            
             proteinKeywords.forEach(protein => {
                 if (content.includes(protein)) {
-                    proteinScores.set(protein, (proteinScores.get(protein) || 0) + 1);
+                    proteinScores.set(protein, (proteinScores.get(protein) || 0) + totalWeight);
                 }
             });
         });
 
-        // Boost scores for recently cooked proteins (higher weight)
+        // Strong boost for recently cooked proteins (action > viewing)
         cookLogs.forEach(log => {
             const title = log.recipeTitle?.toLowerCase() || '';
             proteinKeywords.forEach(protein => {
                 if (title.includes(protein)) {
-                    proteinScores.set(protein, (proteinScores.get(protein) || 0) + 3); // 3x weight for cooked
+                    proteinScores.set(protein, (proteinScores.get(protein) || 0) + 3); // Cooking still gets highest weight
                 }
             });
         });
@@ -186,22 +231,33 @@ class UserPreferenceAnalyzer {
     }
 
     /**
-     * Ranks cuisine preferences from bookmarks and views
+     * Ranks cuisine preferences from bookmarks, views, and ratings
+     * Balanced approach: Views + rating boosts
      */
-    rankCuisinePreferences(recipes, viewHistory) {
+    rankCuisinePreferencesWithRatings(recipes, viewHistory, ratings) {
         const cuisineScores = new Map();
         
-        // Score from saved recipes
+        // Create lookup for liked recipes
+        const likedRecipeIds = new Set(
+            ratings.filter(r => r.rating === 'liked').map(r => r.recipeId)
+        );
+        
+        // Score from saved recipes (base preference from saving)
         recipes.forEach(recipe => {
             if (recipe.cuisine) {
                 const cuisine = recipe.cuisine.toLowerCase();
-                cuisineScores.set(cuisine, (cuisineScores.get(cuisine) || 0) + 2);
+                // Base weight for all saved recipes
+                const baseWeight = 2;
+                // Modest boost for liked recipes
+                const ratingBoost = likedRecipeIds.has(recipe.recipeId) ? 1 : 0;
+                const totalWeight = baseWeight + ratingBoost;
+                
+                cuisineScores.set(cuisine, (cuisineScores.get(cuisine) || 0) + totalWeight);
             }
         });
 
-        // Score from view history (lighter weight)
+        // Score from view history (lighter weight for browsing behavior)
         viewHistory.forEach(entry => {
-            // Extract cuisine from recipe title or other fields if available
             const title = entry.recipeTitle?.toLowerCase() || '';
             const cuisineHints = ['italian', 'mexican', 'asian', 'indian', 'thai', 'chinese', 'mediterranean', 'french', 'japanese', 'korean'];
             
@@ -449,6 +505,18 @@ class UserPreferenceAnalyzer {
             }
         }
 
+        // NEW: Rating insights for better LLM context
+        if (profile.ratingInsights && profile.ratingInsights.hasRatingData) {
+            if (profile.ratingInsights.recentLikedTitles.length > 0) {
+                sections.push(`Recently liked recipes: ${profile.ratingInsights.recentLikedTitles.slice(0, 5).join(', ')}.`);
+            }
+            
+            // Add engagement context
+            if (profile.ratingInsights.engagementLevel === 'high') {
+                sections.push(`User actively rates recipes (${profile.ratingInsights.totalLikes} likes).`);
+            }
+        }
+
         return sections.join(' ');
     }
 
@@ -565,6 +633,44 @@ class UserPreferenceAnalyzer {
         }
         
         return context.trim();
+    }
+
+    /**
+     * Generates rating insights for LLM context
+     * Provides specific information about liked/disliked recipes for better AI recommendations
+     */
+    generateRatingInsights(ratings) {
+        if (ratings.length === 0) {
+            return {
+                likedRecipes: [],
+                totalLikes: 0,
+                totalDislikes: 0,
+                recentLikedTitles: [],
+                hasRatingData: false
+            };
+        }
+
+        const likedRatings = ratings.filter(r => r.rating === 'liked');
+        const dislikedRatings = ratings.filter(r => r.rating === 'disliked');
+        
+        // Get recent liked recipe titles for LLM context
+        const recentLikedTitles = likedRatings
+            .slice(0, 8) // Most recent 8 liked recipes
+            .map(r => r.recipeTitle)
+            .filter(Boolean);
+
+        return {
+            likedRecipes: likedRatings.map(r => ({
+                title: r.recipeTitle,
+                ratedAt: r.ratedAt,
+                source: r.source
+            })),
+            totalLikes: likedRatings.length,
+            totalDislikes: dislikedRatings.length,
+            recentLikedTitles,
+            hasRatingData: true,
+            engagementLevel: ratings.length >= 5 ? 'high' : ratings.length >= 2 ? 'medium' : 'low'
+        };
     }
 }
 

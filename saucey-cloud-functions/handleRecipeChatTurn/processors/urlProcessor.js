@@ -46,12 +46,12 @@ async function processUrlInput(sourceUrl, userPrompt = null, userId, preferredCh
             if (doc.exists) {
                 const data = doc.data();
                 userPreferences = {
-                    difficulty: data.preferredRecipeDifficulty || 'medium',
                     allergensToAvoid: data.allergensToAvoid || [],
                     dietaryPreferences: data.dietaryPreferences || [],
                     customDietaryNotes: data.customDietaryNotes || '',
                     preferredCookTimePreference: data.preferredCookTimePreference || '',
                     preferredChefPersonality: data.preferredChefPersonality || '',
+                    preferredRecipeDifficulty: data.preferredRecipeDifficulty || 'medium',
                     selectedDietaryFilters: data.selectedDietaryFilters || []
                 };
             }

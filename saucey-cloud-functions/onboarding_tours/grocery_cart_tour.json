@@ -1,22 +1,35 @@
 {
   "sectionName": "Grocery Cart Tour",
+  "sectionKey": "groceryCart",
   "steps": [
     {
       "stepIndex": 0,
+      "highlightTag": "groceryCart.inputBarButton",
+      "text": "Access your grocery cart from any screen using this button in the input bar! It shows a green dot when shared with others.",
+      "arrowEdge": "top"
+    },
+    {
+      "stepIndex": 1,
       "highlightTag": "groceryCart.tabs",
       "text": "Your list is organized! View 'All Items', or filter by items from specific recipes or those you've added manually.",
       "arrowEdge": "bottom"
     },
     {
-      "stepIndex": 1,
+      "stepIndex": 2,
       "highlightTag": "groceryCart.itemRow.any",
       "text": "Tap the circle to check an item off your list. Tap the item's name to edit its quantity or unit.",
       "arrowEdge": "trailing"
     },
     {
-      "stepIndex": 2,
+      "stepIndex": 3,
+      "highlightTag": "groceryCart.shareButton",
+      "text": "Share your cart with family or friends! When shared, everyone sees the same items in real-time.",
+      "arrowEdge": "bottom"
+    },
+    {
+      "stepIndex": 4,
       "highlightTag": "groceryCart.ellipsisMenu",
-      "text": "Use the menu for more options like sharing your list, hiding checked items, or clearing them.",
+      "text": "Use the menu for more options like hiding checked items, clearing them, or sharing your list.",
       "arrowEdge": "bottom"
     }
   ]

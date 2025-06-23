@@ -5,7 +5,6 @@ const globalConfig = require('@saucey/shared/config/globalConfig.js');
 
 // 2. Require prompts (paths are relative to this config.js file)
 const CHEF_PERSONALITY_PROMPTS = require('./prompts/chefPersonalities');
-const DETAILED_RECIPE_JSON_SCHEMA_PROMPT = require('./prompts/recipeSystemInstructions');
 
 // --- Recipe-Specific Gemini Model Configuration ---
 // These allow handleRecipeChatTurn to use specific env vars or fallback to global, then to a default.
@@ -78,7 +77,6 @@ module.exports = {
   RECIPES_SUBCOLLECTION,
 
   // Prompts (these are specific to handleRecipeChatTurn)
-  DETAILED_RECIPE_JSON_SCHEMA_PROMPT,
   CHEF_PERSONALITY_PROMPTS,
   RECIPE_SYSTEM_PROMPT_JSON,
 

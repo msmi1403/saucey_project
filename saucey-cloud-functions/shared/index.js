@@ -8,12 +8,10 @@ const commonUtils = require('./utils/commonUtils');
 const firestoreHelper = require('./services/firestoreHelper');
 const geminiClient = require('./services/geminiClient');
 const globalConfig = require('./config/globalConfig');
-const authMiddleware = require('./middleware/authMiddleware');
 
 module.exports = {
   commonUtils,
   firestoreHelper,
   geminiClient,
   globalConfig,
-  authMiddleware,
 };

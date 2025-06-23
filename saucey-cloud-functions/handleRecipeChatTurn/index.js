@@ -211,47 +211,66 @@ async function saveChatMessage(userId, chatId, message) {
 async function getUserPreferences(userId) {
     try {
         const doc = await db.collection('users').doc(userId).get();
+        let basicPreferences;
+        
         if (doc.exists) {
             const data = doc.data();
-            const preferences = {
-                difficulty: data.preferredRecipeDifficulty || 'medium',
+            basicPreferences = {
                 allergensToAvoid: data.allergensToAvoid || [],
                 dietaryPreferences: data.dietaryPreferences || [],
                 customDietaryNotes: data.customDietaryNotes || '',
                 preferredCookTimePreference: data.preferredCookTimePreference || '',
                 preferredChefPersonality: data.preferredChefPersonality || '',
+                preferredRecipeDifficulty: data.preferredRecipeDifficulty || 'medium',
                 // Legacy field for backward compatibility
                 selectedDietaryFilters: data.selectedDietaryFilters || []
             };
-            logger.info(`User preferences raw data for ${userId}:`);
-            logger.info(`- Document keys: ${JSON.stringify(Object.keys(data))}`);
-            logger.info(`- allergensToAvoid: ${JSON.stringify(data.allergensToAvoid)}`);
-            logger.info(`- dietaryPreferences: ${JSON.stringify(data.dietaryPreferences)}`);
-            logger.info(`- preferredRecipeDifficulty: ${JSON.stringify(data.preferredRecipeDifficulty)}`);
-            logger.info(`- customDietaryNotes: ${JSON.stringify(data.customDietaryNotes)}`);
-            logger.info(`- Final preferences object: ${JSON.stringify(preferences)}`);
-            return preferences;
         } else {
             logger.warn('User document does not exist:', { userId });
-            return {
-                difficulty: 'medium',
+            basicPreferences = {
                 allergensToAvoid: [],
                 dietaryPreferences: [],
                 customDietaryNotes: '',
                 preferredCookTimePreference: '',
                 preferredChefPersonality: '',
+                preferredRecipeDifficulty: 'medium',
                 selectedDietaryFilters: []
             };
         }
+
+        // NEW: Add enhanced profile with rating insights
+        try {
+            const { UserPreferenceAnalyzer } = require('../shared/services/userPreferenceAnalyzer');
+            const analyzer = new UserPreferenceAnalyzer();
+            const enhancedProfile = await analyzer.generateUserPreferenceProfile(userId);
+            
+            if (enhancedProfile && enhancedProfile.dataQuality.hasGoodData) {
+                // Add formatted profile to basic preferences for Gemini context
+                basicPreferences.enhancedContext = analyzer.formatProfileForPrompt(enhancedProfile);
+                logger.info(`Enhanced user context added for ${userId}: ${basicPreferences.enhancedContext.substring(0, 200)}...`);
+            }
+        } catch (enhancedError) {
+            // Silent fallback - enhanced context is optional
+            logger.warn(`Could not generate enhanced profile for ${userId}: ${enhancedError.message}`);
+        }
+
+        logger.info(`User preferences for ${userId}:`);
+        logger.info(`- allergensToAvoid: ${JSON.stringify(basicPreferences.allergensToAvoid)}`);
+        logger.info(`- dietaryPreferences: ${JSON.stringify(basicPreferences.dietaryPreferences)}`);
+        logger.info(`- preferredRecipeDifficulty: ${JSON.stringify(basicPreferences.preferredRecipeDifficulty)}`);
+        logger.info(`- customDietaryNotes: ${JSON.stringify(basicPreferences.customDietaryNotes)}`);
+        logger.info(`- enhancedContext: ${basicPreferences.enhancedContext ? 'present' : 'not available'}`);
+        
+        return basicPreferences;
     } catch (error) {
         logger.error('Error fetching user preferences:', { error: error.message, userId });
         return {
-            difficulty: 'medium',
             allergensToAvoid: [],
             dietaryPreferences: [],
             customDietaryNotes: '',
             preferredCookTimePreference: '',
             preferredChefPersonality: '',
+            preferredRecipeDifficulty: 'medium',
             selectedDietaryFilters: []
         };
     }

@@ -54,12 +54,15 @@ const recipeSchema = {
 const typesenseInitializationPromise = (async () => {
     try {
         logger.log("Initializing Typesense clients...");
-        const host = await getSecretValue("TYPESENSE_HOST");
-        const port = await getSecretValue("TYPESENSE_PORT");
-        const protocol = await getSecretValue("TYPESENSE_PROTOCOL");
         
-        const searchApiKey = await getSecretValue("TYPESENSE_SEARCH_API_KEY");
-        const adminApiKey = await getSecretValue("TYPESENSE_ADMIN_API_KEY");
+        // Fetch all secrets in parallel for better performance
+        const [host, port, protocol, searchApiKey, adminApiKey] = await Promise.all([
+            getSecretValue("TYPESENSE_HOST"),
+            getSecretValue("TYPESENSE_PORT"),
+            getSecretValue("TYPESENSE_PROTOCOL"),
+            getSecretValue("TYPESENSE_SEARCH_API_KEY"),
+            getSecretValue("TYPESENSE_ADMIN_API_KEY")
+        ]);
 
         typesenseSearchClientInternal = new Typesense.Client({
             nodes: [{ host, port: parseInt(port, 10), protocol }],

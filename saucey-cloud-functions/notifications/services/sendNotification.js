@@ -165,7 +165,24 @@ async function dispatchNotification(userId, notificationTypeKey, dynamicData = {
 
   logger.debug(`Personalized content ready. Title: "${content.title}", Body: "${content.body}". Deep Link: "${finalDeepLink}"`, { userId, notificationTypeKey, finalDeepLink });
 
-  // E. Construct FCM Payload
+  // E. Get current badge count and increment
+  let currentBadgeCount = 1; // Default fallback
+  try {
+    const userDoc = await firestoreHelper.getDocument("users", userId);
+    currentBadgeCount = (userDoc?.badgeCount || 0) + 1;
+    
+    // Update badge count in user document
+    await firestoreHelper.updateDocument("users", userId, {
+      badgeCount: currentBadgeCount
+    });
+    
+    logger.info(`Updated badge count for user ${userId}: ${currentBadgeCount}`, { userId, badgeCount: currentBadgeCount });
+  } catch (error) {
+    logger.error(`Error updating badge count for user ${userId}:`, { userId, error: error.message });
+    // Continue with default badge count
+  }
+
+  // F. Construct FCM Payload
   const fcmPayload = {
     notification: {
       title: `${content.emoji ? content.emoji + " " : ""}${content.title || 'Update from Saucey'}`,
@@ -188,7 +205,7 @@ async function dispatchNotification(userId, notificationTypeKey, dynamicData = {
       payload: {
         aps: {
           sound: "default",
-          badge: 1, // Or manage badge count more dynamically if needed
+          badge: currentBadgeCount, // Use actual badge count
           "content-available": baseConfig.isContentAvailable || 0, // e.g. for background updates, from config
         },
       },

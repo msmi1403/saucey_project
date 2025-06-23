@@ -47,26 +47,16 @@ function buildRichSystemInstruction({
 }) {
     let systemSections = [];
 
-    // Core cooking assistant identity with chef personality
+    // 1. Chef personality (existing)
     const chefPersonality = chefPreambleString || "You are a helpful, expert, and friendly cooking assistant.";
     systemSections.push(chefPersonality);
 
-    // Core behavioral instructions
-    systemSections.push(`
-RECIPE TITLES: Keep them clean and simple (e.g., "Spicy Chicken Curry"). Never include dietary restrictions in parentheses like "(dairy-free)" or "(no nuts)" in the title itself.
-
-DIETARY AWARENESS: When the user has dietary restrictions, acknowledge them naturally in your response with phrases like "Here's a recipe that works with your dietary needs:" or "This fits your preferences perfectly:" before presenting the clean title.
-
-AVOID REPETITION: Always check the conversation history before suggesting recipes. Never suggest the same or very similar recipes that were already mentioned in this conversation. If asked for "more ideas," provide completely different recipes with different ingredients, cooking methods, or flavor profiles.
-
-Be warm, helpful, and conversational. If an image is shared, describe what you see and provide cooking advice naturally. Don't force structured data unless specifically requested.`);
-
-    // User preferences (remember throughout conversation)
+    // 2. User preferences (existing, moved up in priority)
     if (userPreferences) {
         let userContext = "\n--- USER PROFILE (remember this throughout our conversation) ---";
         
-        if (userPreferences.difficulty && userPreferences.difficulty !== 'medium') {
-            userContext += `\nRecipe Difficulty: Prefers ${userPreferences.difficulty} recipes`;
+        if (userPreferences.preferredRecipeDifficulty && userPreferences.preferredRecipeDifficulty !== 'medium') {
+            userContext += `\nRecipe Difficulty: Prefers ${userPreferences.preferredRecipeDifficulty} recipes`;
         }
         
         if (userPreferences.preferredCookTimePreference && userPreferences.preferredCookTimePreference !== '') {
@@ -86,14 +76,33 @@ Be warm, helpful, and conversational. If an image is shared, describe what you s
         }
         
         systemSections.push(userContext);
+        
+        // NEW: Enhanced context with rating insights
+        if (userPreferences.enhancedContext) {
+            systemSections.push(`\n--- USER COOKING PATTERNS & PREFERENCES ---\n${userPreferences.enhancedContext}`);
+        }
     }
 
-    // Kitchen inventory (remember throughout conversation)
+    // 3. Recipe Guidelines (essential only)
+    const recipeGuidelines = `
+WHEN PROVIDING RECIPES:
+- Keep titles clean and simple (e.g., "Spicy Chicken Curry")
+- Never include dietary restrictions in parentheses in titles
+- Acknowledge dietary needs naturally: "Here's a recipe that works with your dietary needs:"
+- When helpful, include brief cooking tips in parentheses (especially for techniques that might be unfamiliar)
+- When providing a complete recipe with ingredients and instructions, append [save] at the end
+- When providing ingredient lists or shopping suggestions, append [Add to cart] at the end
+- When providing complete recipes, also append [rate] to allow user feedback
+- Full recipe tags: [save][Add to cart][rate]`;
+
+    systemSections.push(recipeGuidelines);
+
+    // 4. Kitchen inventory (existing, lowest priority)
     if (ingredientContext) {
         systemSections.push(`\n--- USER'S KITCHEN (remember this throughout our conversation) ---\n${ingredientContext}`);
     }
 
-    return systemSections.join('\n');
+    return systemSections.join('\n\n');
 }
 
 // Simple user message builder (just the essentials per turn)

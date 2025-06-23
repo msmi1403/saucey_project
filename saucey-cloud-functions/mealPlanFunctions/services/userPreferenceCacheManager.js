@@ -13,7 +13,7 @@ class UserPreferenceCacheManager {
         this.CACHE_COLLECTION = 'user_preference_cache';
         this.INVALIDATION_EVENTS = [
             'recipe_saved', 'recipe_cooked', 'recipe_viewed',
-            'meal_plan_generated', 'cookbook_updated'
+            'meal_plan_generated', 'cookbook_updated', 'recipe_rated'
         ];
     }
 

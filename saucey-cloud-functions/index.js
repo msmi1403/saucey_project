@@ -22,10 +22,7 @@ if (admin.apps.length === 0) {
 
 // Each function or group is now exported directly, making it Gen 2 compatible.
 
-// Debug Functions
-// Assuming "./debugFunctions" exports testSecretAccess and "./debugFunctions/sendDebugNotification" exports sendDebugNotificationToUser
-exports.testSecretAccess = require("./debugFunctions").testSecretAccess;
-exports.sendDebugNotificationToUser = require("./debugFunctions/sendDebugNotification").sendDebugNotificationToUser;
+// Test Auth Functions removed
 
 // Feedback Functions
 // Assuming "./feedbackFunctions/feedbackService" exports all its functions directly
@@ -41,6 +38,7 @@ Object.assign(exports, require("./app-call-functions/recipeManagement"));
 Object.assign(exports, require("./app-call-functions/userProfile"));
 Object.assign(exports, require("./app-call-functions/discovery"));
 Object.assign(exports, require("./app-call-functions/recipeRetrieval"));
+
 
 // Notifications Module
 // Assuming "./notifications" exports all its notification functions directly (after our previous refactor of notifications/index.js)
