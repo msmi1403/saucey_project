@@ -17,15 +17,16 @@ const analyzeMyIngredients = onCall(async (request) => {
         logger.info(`Request data received:`, {
             userId,
             dataKeys: Object.keys(requestData || {}),
-            hasImageData: !!(requestData && requestData.imageDataBase64),
+            hasImageDataArray: !!(requestData && requestData.imageDataArray && requestData.imageDataArray.length > 0),
             hasImageMimeType: !!(requestData && requestData.imageMimeType),
             hasTextInput: !!(requestData && requestData.textInput),
             hasExistingIngredients: !!(requestData && requestData.existingIngredients),
+            imageCount: requestData?.imageDataArray?.length || 0,
             imageMimeType: requestData ? requestData.imageMimeType : 'MISSING_DATA'
         });
         
         const { 
-            imageDataBase64, 
+            imageDataArray,
             imageMimeType, 
             textInput,
             location, 
@@ -34,7 +35,7 @@ const analyzeMyIngredients = onCall(async (request) => {
         } = requestData;
         
         // Validate inputs - at least one input method required
-        if (!imageDataBase64 && !textInput) {
+        if ((!imageDataArray || imageDataArray.length === 0) && !textInput) {
             throw new Error('Either image data or text input is required');
         }
 
@@ -54,16 +55,18 @@ const analyzeMyIngredients = onCall(async (request) => {
             }
         }
         
-        // Validate and process image if provided
-        if (imageDataBase64) {
-            const imageProcessingResult = imageProcessor.processImageInput(
-                imageDataBase64, 
-                imageMimeType, 
-                'analyzeMyIngredients'
-            );
-            
-            if (!imageProcessingResult.success) {
-                throw new Error(imageProcessingResult.error);
+        // Validate and process images if provided
+        if (imageDataArray && imageDataArray.length > 0) {
+            for (let i = 0; i < imageDataArray.length; i++) {
+                const imageProcessingResult = imageProcessor.processImageInput(
+                    imageDataArray[i], 
+                    imageMimeType, 
+                    `analyzeMyIngredients_image_${i}`
+                );
+                
+                if (!imageProcessingResult.success) {
+                    throw new Error(`Image ${i + 1} processing failed: ${imageProcessingResult.error}`);
+                }
             }
         }
         
@@ -75,33 +78,31 @@ const analyzeMyIngredients = onCall(async (request) => {
         
         const finalLocation = location || 'fridge';
         
-        logger.info(`Analyzing ingredients for user ${userId} (smart merge)`, {
+        logger.info(`Analyzing ingredients for user ${userId} (single-step)`, {
             userId,
             location: finalLocation,
             hasAnnotation: hasAnnotation || false,
-            hasImage: !!imageDataBase64,
+            imageCount: imageDataArray ? imageDataArray.length : 0,
             hasText: !!textInput,
             existingIngredientsCount: existingIngredients ? existingIngredients.length : 0
         });
         
-        // Always use smart merge analysis (handles empty existing ingredients gracefully)
-        const analysisResult = await geminiService.analyzeIngredientsWithSmartMerge(
-            imageDataBase64,
+        // Single-step analysis with all inputs
+        const analysisResult = await geminiService.analyzeIngredients(
+            imageDataArray && imageDataArray.length > 0 ? imageDataArray : null,
             imageMimeType,
             textInput,
             finalLocation,
-            existingIngredients || [] // Always pass existing ingredients array (can be empty)
+            existingIngredients || []
         );
         
         logger.info(`Successfully analyzed ingredients for user ${userId}`, {
             userId,
-            detectedCount: analysisResult.detectedIngredients ? analysisResult.detectedIngredients.length : 0,
-            confidence: analysisResult.confidence,
-            mergeStrategy: analysisResult.mergeStrategy || 'smart_merge',
-            needsUserReview: analysisResult.needsUserReview || false
+            ingredientsCount: analysisResult.ingredients ? analysisResult.ingredients.length : 0,
+            summary: analysisResult.summary
         });
         
-        // Return analysis result - callable functions automatically wrap it properly
+        // Return analysis result
         return analysisResult;
         
     } catch (error) {

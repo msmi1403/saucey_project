@@ -64,11 +64,15 @@ Return ONLY the JSON object, no additional text.
  * Parses conversational recipe text into structured JSON
  * @param {string} recipeText - Natural recipe text from conversation
  * @param {object} userPreferences - User dietary preferences for context
+ * @param {string} existingRecipeId - Optional existing recipe ID to preserve
  * @returns {Promise<object>} Structured recipe JSON
  */
-async function parseRecipeText(recipeText, userPreferences = null) {
+async function parseRecipeText(recipeText, userPreferences = null, existingRecipeId = null) {
     try {
         console.log('RecipeParsingService: Parsing recipe text of length:', recipeText.length);
+        if (existingRecipeId) {
+            console.log('RecipeParsingService: Using existing recipe ID:', existingRecipeId);
+        }
         
         let prompt = `Parse this recipe text into structured JSON:\n\n${recipeText}`;
         
@@ -111,9 +115,13 @@ async function parseRecipeText(recipeText, userPreferences = null) {
             throw new Error('Parsed recipe missing required fields');
         }
 
-        // Generate UUID if not present
-        if (!parsedRecipe.recipeId) {
+        // Use existing ID if provided, otherwise generate new one
+        if (existingRecipeId) {
+            parsedRecipe.recipeId = existingRecipeId;
+            console.log('RecipeParsingService: Preserved existing recipe ID:', existingRecipeId);
+        } else if (!parsedRecipe.recipeId) {
             parsedRecipe.recipeId = generateUUID();
+            console.log('RecipeParsingService: Generated new recipe ID:', parsedRecipe.recipeId);
         }
 
         // Set default source

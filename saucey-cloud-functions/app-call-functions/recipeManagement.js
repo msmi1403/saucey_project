@@ -3,7 +3,8 @@ const admin = require("firebase-admin");
 const { logger } = require("firebase-functions/v2"); // Use Gen 2 logger
 // Import the recipe parsing service
 const { parseRecipeText } = require('../handleRecipeChatTurn/services/recipeParsingService');
-const { getModel } = require('../shared/services/geminiClient');
+const { getModel, generateContent } = require('../shared/services/geminiClient');
+const globalConfig = require('../shared/config/globalConfig');
 // Import cache manager for invalidating user preferences when rating recipes
 const UserPreferenceCacheManager = require('../mealPlanFunctions/services/userPreferenceCacheManager');
 // Assuming admin is initialized in a shared file, e.g., ../shared/firebaseAdmin.js
@@ -134,7 +135,7 @@ const unpublishPublicRecipe = onCall(async (request) => {
  * Shared helper function for recipe parsing with user context
  * Extracts common logic used by all parseRecipe* functions
  */
-async function parseRecipeWithUserContext(recipeText, userId, logPrefix) {
+async function parseRecipeWithUserContext(recipeText, userId, logPrefix, existingRecipeId = null) {
   // 1. Validate input
   if (!recipeText || typeof recipeText !== "string" || recipeText.trim().length === 0) {
     logger.error(`${logPrefix} Invalid recipeText provided.`, { recipeText });
@@ -153,6 +154,9 @@ async function parseRecipeWithUserContext(recipeText, userId, logPrefix) {
   }
 
   logger.info(`${logPrefix} User ${userId} parsing recipe text of ${recipeText.length} characters.`);
+  if (existingRecipeId) {
+    logger.info(`${logPrefix} Using existing recipe ID: ${existingRecipeId}`);
+  }
 
   // 2. Get user preferences for context
   let userPreferences = null;
@@ -172,8 +176,8 @@ async function parseRecipeWithUserContext(recipeText, userId, logPrefix) {
     logger.warn(`${logPrefix} Could not fetch user preferences for ${userId}: ${prefError.message}`);
   }
 
-  // 3. Parse the recipe text using the existing service (EXACT SAME LOGIC)
-  const parsedRecipe = await parseRecipeText(recipeText, userPreferences);
+  // 3. Parse the recipe text using the existing service with optional existing ID
+  const parsedRecipe = await parseRecipeText(recipeText, userPreferences, existingRecipeId);
 
   return { parsedRecipe, userPreferences };
 }
@@ -194,13 +198,13 @@ const parseRecipeForCookbook = onCall(async (request) => {
   }
 
   const userId = request.auth.uid;
-  const { recipeText } = request.data;
+  const { recipeText, existingRecipeId } = request.data;
 
   try {
-    // 2. Use shared parsing logic
-    const { parsedRecipe } = await parseRecipeWithUserContext(recipeText, userId, logPrefix);
+    // 2. Use shared parsing logic with optional existing recipe ID
+    const { parsedRecipe } = await parseRecipeWithUserContext(recipeText, userId, logPrefix, existingRecipeId);
 
-    // 3. Save to my_recipes collection
+    // 3. Save to my_recipes collection (will overwrite if existingRecipeId is provided)
     const recipeForSaving = {
       ...parsedRecipe,
       createdByUserId: userId,
@@ -213,12 +217,13 @@ const parseRecipeForCookbook = onCall(async (request) => {
     const myRecipesRef = db.collection('users').doc(userId).collection('my_recipes').doc(parsedRecipe.recipeId);
     await myRecipesRef.set(recipeForSaving);
 
-    logger.info(`${logPrefix} Saved recipe to my_recipes: ${parsedRecipe.title} for user ${userId}`);
+    const action = existingRecipeId ? 'updated' : 'saved';
+    logger.info(`${logPrefix} ${action} recipe to my_recipes: ${parsedRecipe.title} for user ${userId}`);
 
     return {
       success: true,
       recipe: parsedRecipe,
-      message: "Recipe saved to cookbook successfully"
+      message: `Recipe ${action} successfully`
     };
 
   } catch (error) {
@@ -602,8 +607,6 @@ async function fetchUserIngredientsForAnalysis(userId) {
  */
 async function analyzeIngredientsWithUserContext(recipeIngredients, userIngredients, recipeTitle) {
   try {
-    const model = await getModel('gemini-2.0-flash');
-    
     // Format user ingredients for analysis
     const userIngredientsText = userIngredients.length > 0 
       ? userIngredients.map(ing => `${ing.name} (${ing.kitchenSection || ing.location})`).join(', ')
@@ -668,9 +671,17 @@ ${userIngredientsText}
 
 Only return the JSON object, no additional text.`;
 
-    const result = await model.generateContent([{ text: prompt }]);
-    const response = await result.response;
-    const responseText = response.text();
+    // Use the correct generateContent function from geminiClient
+    const result = await generateContent({
+      modelName: globalConfig.GEMINI_MODEL_NAME,
+      contents: [{ text: prompt }],
+      generationConfig: {
+        temperature: globalConfig.GEMINI_TEXT_TEMPERATURE,
+        maxOutputTokens: globalConfig.GEMINI_TEXT_MAX_OUTPUT_TOKENS,
+      }
+    });
+
+    const responseText = result.text();
 
     // Parse JSON response
     let parsedResponse;
@@ -691,11 +702,11 @@ Only return the JSON object, no additional text.`;
       parsedResponse = JSON.parse(cleanedText);
     } catch (parseError) {
       logger.error('Error parsing cart analysis response:', parseError);
-      // Fallback: return all ingredients with basic categorization
+      // Fallback: return all ingredients with basic categorization and handle undefined values
       return recipeIngredients.map(ing => ({
-        itemName: ing.item_name,
-        quantity: ing.quantity,
-        unit: ing.unit,
+        itemName: ing.item_name || 'Unknown ingredient',
+        quantity: ing.quantity || null,
+        unit: ing.unit || null, // Ensure unit is null instead of undefined
         storeSection: 'other',
         userNote: null
       }));
@@ -705,11 +716,11 @@ Only return the JSON object, no additional text.`;
 
   } catch (error) {
     logger.error('Error in cart analysis with user context:', error);
-    // Fallback: return all ingredients with basic categorization
+    // Fallback: return all ingredients with basic categorization and handle undefined values
     return recipeIngredients.map(ing => ({
-      itemName: ing.item_name,
-      quantity: ing.quantity,
-      unit: ing.unit,
+      itemName: ing.item_name || 'Unknown ingredient',
+      quantity: ing.quantity || null,
+      unit: ing.unit || null, // Ensure unit is null instead of undefined
       storeSection: 'other', 
       userNote: null
     }));
@@ -742,9 +753,9 @@ async function addIngredientsToCartWithConfidence(userId, analyzedIngredients, r
     // Convert ALL analyzed ingredients to GroceryCartItem format (no filtering)
     const newCartItems = analyzedIngredients.map(ingredient => ({
       id: generateUUID(),
-      itemName: ingredient.itemName,
+      itemName: ingredient.itemName || 'Unknown ingredient',
       quantity: parseQuantityToNumber(ingredient.quantity),
-      unit: ingredient.unit,
+      unit: ingredient.unit || null, // Ensure unit is null instead of undefined
       isChecked: false,
       storeSection: mapToStoreAisle(ingredient.storeSection),
       originalRecipeId: recipeContext.recipeId,

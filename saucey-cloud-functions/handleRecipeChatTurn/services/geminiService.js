@@ -2,7 +2,6 @@
 
 const geminiClient = require('@saucey/shared/services/geminiClient.js'); 
 const { extractJsonFromText } = require('@saucey/shared/utils/commonUtils.js'); 
-const { modelsInitializationPromise } = require('@saucey/shared/services/geminiClient.js');
 const imageProcessor = require('@saucey/shared/services/imageProcessor.js');
 
 const config = require('../config');
@@ -27,14 +26,13 @@ const recipeDefaultGenerationConfig = {
     // Remove JSON forcing - allow natural text responses
 };
 
-// Ensure the specific models for this service are requested from the shared client.
-// Calling getModel is async and caches; subsequent calls are fast.
-// This helps ensure they are ready or an error is caught early if misconfigured.
+// Ensure the specific models for this service are ready - using the new SDK pattern
+// The new unified SDK handles model validation differently
 const recipeServiceModelsInitPromise = Promise.all([
-    geminiClient.getModel(config.GEMINI_MODEL_NAME).catch(e => { console.error(`Failed to init recipe text model ${config.GEMINI_MODEL_NAME}: ${e.message}`); throw e; }),
-    geminiClient.getModel(config.GEMINI_VISION_MODEL_NAME).catch(e => { console.error(`Failed to init recipe vision model ${config.GEMINI_VISION_MODEL_NAME}: ${e.message}`); throw e; })
+    geminiClient.getModel(config.GEMINI_MODEL_NAME).catch(e => { console.error(`Failed to validate recipe text model ${config.GEMINI_MODEL_NAME}: ${e.message}`); throw e; }),
+    geminiClient.getModel(config.GEMINI_VISION_MODEL_NAME).catch(e => { console.error(`Failed to validate recipe vision model ${config.GEMINI_VISION_MODEL_NAME}: ${e.message}`); throw e; })
 ]).catch(error => {
-    console.error("FATAL: Recipe Gemini Service: Initialization of specific models from shared client failed during module load:", error.message);
+    console.error("FATAL: Recipe Gemini Service: Model validation failed during module load:", error.message);
     // This error will propagate and cause function calls to fail if models aren't available.
 });
 
@@ -90,10 +88,8 @@ WHEN PROVIDING RECIPES:
 - Never include dietary restrictions in parentheses in titles
 - Acknowledge dietary needs naturally: "Here's a recipe that works with your dietary needs:"
 - When helpful, include brief cooking tips in parentheses (especially for techniques that might be unfamiliar)
-- When providing a complete recipe with ingredients and instructions, append [save] at the end
-- When providing ingredient lists or shopping suggestions, append [Add to cart] at the end
-- When providing complete recipes, also append [rate] to allow user feedback
-- Full recipe tags: [save][Add to cart][rate]`;
+- For complete recipes with ingredients and instructions: append [save][Add to cart][rate]
+- For ingredient lists or shopping suggestions only: append [Add to cart]`;
 
     systemSections.push(recipeGuidelines);
 
@@ -105,18 +101,48 @@ WHEN PROVIDING RECIPES:
     return systemSections.join('\n\n');
 }
 
+// Helper function to check if recipe context already exists in conversation
+function chatHistoryContainsRecipe(chatHistory, recipeJsonString) {
+    if (!recipeJsonString || !chatHistory.length) return false;
+    
+    // Extract recipe title from JSON for matching
+    try {
+        const recipe = JSON.parse(recipeJsonString);
+        const recipeTitle = recipe.title;
+        if (!recipeTitle) return false;
+        
+        // Check if any message in history contains this recipe title in context
+        return chatHistory.some(msg => 
+            msg.parts && msg.parts.some(part => 
+                part.text && (
+                    part.text.includes(`"title":"${recipeTitle}"`) ||
+                    part.text.includes(`Current recipe being discussed`) ||
+                    part.text.includes(`RECIPE CONTEXT`)
+                )
+            )
+        );
+    } catch (error) {
+        console.warn('Error parsing recipe JSON for context check:', error.message);
+        return false;
+    }
+}
+
 // Simple user message builder (just the essentials per turn)
 function buildSimpleUserMessage({
     userQuery,
     currentRecipeJsonString = null,
     scrapedPageContent = null,
-    sourceUrl = null
+    sourceUrl = null,
+    chatHistory = []
 }) {
     let messageParts = [userQuery];
 
-    // Only add dynamic context that changes per message
-    if (currentRecipeJsonString) {
+    // Smart recipe context injection - only add if not already in conversation
+    if (currentRecipeJsonString && !chatHistoryContainsRecipe(chatHistory, currentRecipeJsonString)) {
         messageParts.push(`\nCurrent recipe being discussed:\n\`\`\`json\n${currentRecipeJsonString}\n\`\`\``);
+        console.log('Injecting recipe context into conversation');
+    } else if (currentRecipeJsonString) {
+        console.log('Recipe context already present in conversation history - skipping injection');
     }
 
     if (scrapedPageContent && sourceUrl) {
@@ -155,7 +181,8 @@ async function getUnifiedChatResponse({
         userQuery,
         currentRecipeJsonString,
         scrapedPageContent,
-        sourceUrl
+        sourceUrl,
+        chatHistory
     });
 
     const formattedApiHistory = chatHistory.map(msg => ({

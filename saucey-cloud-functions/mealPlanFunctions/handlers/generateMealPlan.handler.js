@@ -189,32 +189,65 @@ async function buildMealPlanPrompt(preferences, userContext, startDate) {
 
 /**
  * Builds date context with cooking day logic
+ * Enhanced to support per-day per-meal preferences
  */
 function buildDateContext(startDate, preferences, totalDays) {
   const dates = [];
-  const cookingDays = preferences.availableCookingDays || ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  
+  // Check if using new enhanced daily meal preferences
+  const hasEnhancedScheduling = preferences.dailyMealPreferences && 
+    Object.keys(preferences.dailyMealPreferences).length > 0;
+  
+  // Fallback to old system if new system not configured
+  const cookingDays = preferences.availableCookingDays || 
+    ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   
   for (let i = 0; i < totalDays; i++) {
     const date = new Date(startDate);
     date.setDate(startDate.getDate() + i);
     
     const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
-    const shouldGenerateMeals = cookingDays.includes(dayName);
     const dateString = date.toISOString().split('T')[0];
+    
+    let shouldGenerateMeals = false;
+    let mealInstructions = 'EMPTY MEALS OBJECT';
+    
+    if (hasEnhancedScheduling) {
+      // NEW: Per-day per-meal scheduling
+      const mealsForDay = preferences.dailyMealPreferences[dayName] || [];
+      if (mealsForDay.length > 0) {
+        shouldGenerateMeals = true;
+        const mealTypesList = mealsForDay.join(', ');
+        mealInstructions = `GENERATE ONLY: ${mealTypesList}`;
+      }
+    } else {
+      // FALLBACK: Old system - all enabled meals on cooking days
+      shouldGenerateMeals = cookingDays.includes(dayName);
+      if (shouldGenerateMeals) {
+        const enabledMeals = [];
+        if (preferences.includeBreakfast) enabledMeals.push('breakfast');
+        if (preferences.includeLunch) enabledMeals.push('lunch');
+        if (preferences.includeDinner) enabledMeals.push('dinner');
+        mealInstructions = enabledMeals.length > 0 ? `GENERATE FULL MEALS: ${enabledMeals.join(', ')}` : 'EMPTY MEALS OBJECT';
+      }
+    }
     
     dates.push({
       date: dateString,
       dayName,
-      generateMeals: shouldGenerateMeals
+      generateMeals: shouldGenerateMeals,
+      mealInstructions
     });
   }
 
   // Create instructions for AI
   const instructions = dates.map(d => 
-    `${d.date} (${d.dayName}): ${d.generateMeals ? 'GENERATE FULL MEALS' : 'EMPTY MEALS OBJECT'}`
+    `${d.date} (${d.dayName}): ${d.mealInstructions}`
   ).join('\n');
 
-  return `EXACT DATE INSTRUCTIONS:\n${instructions}\n\nGenerate meals only for cooking days. Use empty meals object {} for non-cooking days.`;
+  const systemType = hasEnhancedScheduling ? 'Enhanced per-day per-meal scheduling' : 'Legacy cooking days system';
+  
+  return `EXACT DATE INSTRUCTIONS (${systemType}):\n${instructions}\n\nGenerate meals only as specified above. Use empty meals object {} when no meals are specified.`;
 }
 
 /**
@@ -299,88 +332,75 @@ function buildCookbookContext(cookbookRecipes) {
 function buildConstraintsContext(preferences) {
   const constraints = [];
 
-  // Meal types - be very explicit
-  const mealTypes = [];
-  if (preferences.includeBreakfast) mealTypes.push('breakfast');
-  if (preferences.includeLunch) mealTypes.push('lunch');  
-  if (preferences.includeDinner) mealTypes.push('dinner');
-  if (mealTypes.length > 0) {
-    constraints.push(`REQUIRED MEAL TYPES ONLY: ${mealTypes.join(', ')} - Do NOT include any other meal types`);
-  } else {
-    constraints.push('REQUIRED MEAL TYPES ONLY: None specified - Generate no meals');
+  // General goals
+  if (preferences.mealPlanObjectives && preferences.mealPlanObjectives.length > 0) {
+    constraints.push(`User's goals: ${preferences.mealPlanObjectives.join(', ')}.`);
   }
 
-  // Cuisine preferences - CRITICAL CONSTRAINT
-  if (preferences.preferredCuisines?.length > 0) {
-    const cuisines = preferences.preferredCuisines.join(', ');
-    constraints.push(`REQUIRED CUISINE STYLE: ${cuisines} - ALL recipes must be authentic ${cuisines} dishes. Do NOT generate generic Western/American meals.`);
-  }
-
-  // Target macros - FIX FIELD NAME
-  if (preferences.macroTargets) {
-    const macros = [];
-    if (preferences.macroTargets.calories) macros.push(`${preferences.macroTargets.calories} kcal`);
-    if (preferences.macroTargets.protein) macros.push(`${preferences.macroTargets.protein}g protein`);
-    if (preferences.macroTargets.carbs) macros.push(`${preferences.macroTargets.carbs}g carbs`);
-    if (preferences.macroTargets.fat) macros.push(`${preferences.macroTargets.fat}g fat`);
-    if (macros.length > 0) {
-      constraints.push(`Daily Target Macros: ${macros.join(', ')}`);
-    }
-  }
-
-  // Cook time preference
-  if (preferences.cookTimePreference) {
-    const timeMapping = {
-      'fifteenMinutes': '15 minutes',
-      'thirtyMinutes': '30 minutes', 
-      'sixtyMinutes': '60 minutes'
-    };
-    const timeLimit = timeMapping[preferences.cookTimePreference];
-    if (timeLimit) {
-      constraints.push(`Max Cook Time: ${timeLimit} per meal`);
-    }
-  }
-
-  // Dietary preferences
-  if (preferences.dietaryPreferences?.length > 0) {
+  // Dietary needs and allergies
+  if (preferences.dietaryPreferences && preferences.dietaryPreferences.length > 0) {
     const dietary = preferences.dietaryPreferences.map(pref => pref.rawValue || pref).join(', ');
-    constraints.push(`Dietary Requirements: ${dietary}`);
+    constraints.push(`Strictly adhere to these dietary needs: ${dietary}.`);
+  }
+  if (preferences.allergies && preferences.allergies.length > 0) {
+    constraints.push(`CRITICAL ALLERGIES TO AVOID: ${preferences.allergies.join(', ')}.`);
   }
 
-  // Snacks
-  if (preferences.numberOfSnacks > 0) {
-    constraints.push(`Include ${preferences.numberOfSnacks} snack(s) per day on cooking days`);
+  // Cuisines, kitchen tools, and cooking style
+  if (preferences.preferredCuisines && preferences.preferredCuisines.length > 0) {
+    constraints.push(`Favorite cuisines: ${preferences.preferredCuisines.join(', ')}.`);
   }
-
-  // Cooking experience
+  if (preferences.availableKitchenTools && preferences.availableKitchenTools.length > 0) {
+    constraints.push(`IMPORTANT: The user does NOT have the following tools: ${preferences.availableKitchenTools.join(', ')}. Do NOT suggest recipes that require these specific tools.`);
+  }
   if (preferences.cookingExperience) {
-    const experienceMapping = {
-      'beginner': 'Beginner - prefer simple recipes with basic techniques',
-      'intermediate': 'Intermediate - comfortable with moderate complexity',
-      'advanced': 'Advanced - can handle complex techniques and ingredients'
-    };
-    const experience = experienceMapping[preferences.cookingExperience] || preferences.cookingExperience;
-    constraints.push(`Cooking Experience: ${experience}`);
+    constraints.push(`User's cooking skill level: ${preferences.cookingExperience}.`);
   }
-
-  // Prep volume/batch cooking - ENHANCED WITH SERVING CALCULATION
   if (preferences.prepVolume) {
-    const prepMapping = {
-      'mealByMeal': 'Individual meals - no batch cooking',
-      'batchPrep': 'Batch prep preferred - recipes suitable for meal prep and storage'
-    };
-    const prep = prepMapping[preferences.prepVolume] || preferences.prepVolume;
-    constraints.push(`Prep Style: ${prep}`);
-    
-    // Calculate batch size for batch prep
-    if (preferences.prepVolume === 'batchPrep') {
-      const cookingDays = preferences.availableCookingDays?.length || 7;
-      const batchSize = Math.ceil(7 / cookingDays); // Days of food per cooking session
-      constraints.push(`Batch Size: Make ${batchSize}x servings per recipe to last ${batchSize} days`);
-    }
+    constraints.push(`User prefers a ${preferences.prepVolume} prep volume (cooking for multiple days vs daily).`);
+  }
+  if (preferences.preppedMealPreference) {
+    constraints.push(`User's cooking style is '${preferences.preppedMealPreference}'.`);
+  }
+  if (preferences.recipeSourcePriority) {
+    constraints.push(`Recipe source priority: ${preferences.recipeSourcePriority}.`);
+  }
+  if (preferences.favoriteGroceryStores && preferences.favoriteGroceryStores.length > 0) {
+    constraints.push(`Suggest ingredients commonly found at: ${preferences.favoriteGroceryStores.join(', ')}.`);
   }
 
-  return constraints.join('\n');
+  // Per-meal cook time preferences
+  if (preferences.breakfastPreferences?.cookTimePreference && preferences.breakfastPreferences.cookTimePreference !== "Doesn't Matter") {
+    const timeLimit = getTimeLimit(preferences.breakfastPreferences.cookTimePreference);
+    constraints.push(`Breakfasts must be quick, under ${timeLimit}.`);
+  }
+  if (preferences.lunchPreferences?.cookTimePreference && preferences.lunchPreferences.cookTimePreference !== "Doesn't Matter") {
+    const timeLimit = getTimeLimit(preferences.lunchPreferences.cookTimePreference);
+    constraints.push(`Lunches must be quick, under ${timeLimit}.`);
+  }
+  if (preferences.dinnerPreferences?.cookTimePreference && preferences.dinnerPreferences.cookTimePreference !== "Doesn't Matter") {
+    const timeLimit = getTimeLimit(preferences.dinnerPreferences.cookTimePreference);
+    constraints.push(`Dinners must be quick, under ${timeLimit}.`);
+  }
+
+  return constraints.length > 0 ? `\n--- USER CONSTRAINTS ---\n${constraints.join('\n')}\n` : '';
+}
+
+/**
+ * Helper function to convert cook time preference to time limit string
+ * Updated to handle new string-based cook time preferences
+ */
+function getTimeLimit(cookTimePreference) {
+  const timeMapping = {
+    'Quick (<10min)': '10 minutes',
+    '<30min': '30 minutes',
+    'Doesn\'t matter': 'no time limit',
+    // Legacy support for old enum values
+    'quick': '10 minutes',
+    'thirtyMinutes': '30 minutes', 
+    'any': 'no time limit'
+  };
+  return timeMapping[cookTimePreference] || '30 minutes'; // Default fallback
 }
 
 /**
@@ -424,7 +444,15 @@ async function callAiForMealPlan(prompt, userId) {
   });
 
   try {
-    const parsedResponse = JSON.parse(aiResponseText);
+    // Strip markdown formatting if present (```json ... ```)
+    let cleanedResponse = aiResponseText.trim();
+    if (cleanedResponse.startsWith('```json')) {
+      cleanedResponse = cleanedResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    } else if (cleanedResponse.startsWith('```')) {
+      cleanedResponse = cleanedResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+    }
+    
+    const parsedResponse = JSON.parse(cleanedResponse);
     if (!parsedResponse.plan || !Array.isArray(parsedResponse.plan)) {
       throw new Error("AI response missing 'plan' array");
     }

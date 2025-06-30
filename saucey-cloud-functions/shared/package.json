@@ -8,7 +8,7 @@
   "dependencies": {
     "@google-cloud/firestore": "^7.0.0",
     "@google-cloud/secret-manager": "^5.0.1",
-    "@google/generative-ai": "^0.11.3",
+    "@google/genai": "^1.7.0",
     "firebase-admin": "^12.0.0",
     "uuid": "^9.0.0"
   }

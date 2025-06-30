@@ -38,7 +38,10 @@ Object.assign(exports, require("./app-call-functions/recipeManagement"));
 Object.assign(exports, require("./app-call-functions/userProfile"));
 Object.assign(exports, require("./app-call-functions/discovery"));
 Object.assign(exports, require("./app-call-functions/recipeRetrieval"));
+Object.assign(exports, require("./app-call-functions/personalizedPrompts"));
 
+// Billing Functions
+Object.assign(exports, require("./app-call-functions/billing"));
 
 // Notifications Module
 // Assuming "./notifications" exports all its notification functions directly (after our previous refactor of notifications/index.js)
@@ -56,7 +59,8 @@ Object.assign(exports, require("./mealPlanFunctions"));
 
 // My Ingredients Functions
 Object.assign(exports, require("./myIngredientsFunctions/analyzeMyIngredients"));
-Object.assign(exports, require("./myIngredientsFunctions/analyzeMyIngredientsText"));
 
+// Speech Recognition Functions
+Object.assign(exports, require("./speechRecognitionFunctions/transcribeAudio"));
 
 logger.log("Saucey Cloud Functions (root index.js) processed for FULL deployment. Exports prepared.");

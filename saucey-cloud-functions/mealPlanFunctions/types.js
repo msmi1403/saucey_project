@@ -52,9 +52,45 @@
  */
 
 /**
+ * @typedef {object} MealTypePreferences
+ * @property {string} [cookTimePreference] - Cook time preference for this meal type: "Quick (<10min)", "Doesn't Matter", "< 30 min", "< 60 min", "< 15 min"
+ */
+
+/**
+ * @typedef {object} MacroTargets
+ * @property {number} calories - Daily calorie target
+ * @property {number} protein - Daily protein target in grams
+ * @property {number} carbs - Daily carbs target in grams
+ * @property {number} fat - Daily fat target in grams
+ */
+
+/**
  * @typedef {object} MealPlanPreferences
+ * @property {MacroTargets} macroTargets - Daily macro targets
  * @property {string[]} [availableCookingDays] - List of days when user can cook (e.g., ["Monday", "Friday"]).
  * @property {string} [recipeSourcePriority] - User's preference for recipe sources ("cookbookOnly", "balancedMix", "discoverNew").
+ * @property {string} [updatedAt] - Last updated timestamp
+ * @property {number} [age] - User's age
+ * @property {string} [gender] - User's gender ("Male", "Female", "Prefer Not to Say")
+ * @property {number} [weightKg] - User's weight in kilograms
+ * @property {string} [activityLevel] - User's activity level ("Lightly Active", "Moderately Active", "Very Active")
+ * @property {string[]} [mealPlanObjectives] - Array of meal plan objectives
+ * @property {string[]} [dietaryPreferences] - Array of dietary preferences
+ * @property {string[]} [allergies] - Array of allergy strings
+ * @property {string[]} [preferredCuisines] - Array of preferred cuisine strings
+ * @property {string} [cookingExperience] - Cooking experience level ("Beginner", "Intermediate", "Advanced")
+ * @property {number} planDurationWeeks - Number of weeks for the plan (typically 5)
+ * @property {string[]} [availableKitchenTools] - Array of available kitchen tools
+ * @property {string} [prepVolume] - Prep volume preference ("1-2 days", "2-3 Days", "3-4 Days", "5-7 Days")
+ * @property {string} [preppedMealPreference] - Meal preparation style preference
+ * @property {string[]} [favoriteGroceryStores] - Array of favorite grocery stores
+ * @property {boolean} [includeBreakfast] - Whether to include breakfast in meal plans
+ * @property {boolean} [includeLunch] - Whether to include lunch in meal plans
+ * @property {boolean} [includeDinner] - Whether to include dinner in meal plans
+ * @property {MealTypePreferences} [breakfastPreferences] - Per-meal preferences for breakfast
+ * @property {MealTypePreferences} [lunchPreferences] - Per-meal preferences for lunch
+ * @property {MealTypePreferences} [dinnerPreferences] - Per-meal preferences for dinner
+ * @property {Object.<string, string[]>} [dailyMealPreferences] - Enhanced daily meal selection (e.g., {"Monday": ["breakfast", "dinner"]})
  */
 
 /**

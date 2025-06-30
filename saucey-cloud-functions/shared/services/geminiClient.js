@@ -1,9 +1,9 @@
 // saucey-cloud-functions/shared/services/geminiClient.js
-const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require("@google/generative-ai");
+const { GoogleGenAI, HarmCategory, HarmBlockThreshold } = require("@google/genai");
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 const globalConfig = require('@saucey/shared/config/globalConfig.js'); // Corrected path
 
-let genAI; // Singleton for GoogleGenerativeAI
+let genAI; // Singleton for GoogleGenAI (new unified client)
 let initializedModels = {}; // To store initialized models: { 'modelName': modelInstance }
 
 // --- Modifications for Singleton Initialization ---
@@ -51,7 +51,7 @@ async function getApiKey() {
 }
 
 /**
- * Initializes the core GoogleGenerativeAI client if not already done, ensuring it happens only once.
+ * Initializes the core GoogleGenAI client if not already done, ensuring it happens only once.
  * @returns {Promise<void>}
  */
 async function ensureGenAIInitialized() {
@@ -73,11 +73,12 @@ async function ensureGenAIInitialized() {
                 console.error(`CRITICAL: ${errorMessage}`);
                 throw new Error(errorMessage);
             }
-            genAI = new GoogleGenerativeAI(apiKey);
-            console.log("Shared GeminiClient: GoogleGenerativeAI client initialized.");
+            // New unified SDK initialization - defaults to Gemini Developer API
+            genAI = new GoogleGenAI({apiKey: apiKey});
+            console.log("Shared GeminiClient: GoogleGenAI unified client initialized.");
         } catch (initError) {
             genAIInitializationPromise = null; // Reset promise on error so next call can retry
-            console.error("CRITICAL: Shared GeminiClient: Error during GoogleGenerativeAI client initialization:", initError);
+            console.error("CRITICAL: Shared GeminiClient: Error during GoogleGenAI client initialization:", initError);
             throw initError;
         }
     })();
@@ -87,24 +88,21 @@ async function ensureGenAIInitialized() {
 
 /**
  * Gets a specific generative model instance, initializing it if necessary.
+ * Note: In the new unified SDK, we don't pre-cache model instances since
+ * the API pattern is different (models.generateContent vs getGenerativeModel)
  * @param {string} modelName - The name of the model to get (e.g., 'gemini-1.5-flash-latest').
- * @returns {Promise<GenerativeModel>} The initialized model instance.
+ * @returns {Promise<string>} The model name (for backwards compatibility).
  */
 async function getModel(modelName) {
     await ensureGenAIInitialized(); // This will now correctly await the single initialization
-    if (!initializedModels[modelName]) {
-        if (!genAI) { // Should be caught by ensureGenAIInitialized, but as a safeguard
-            throw new Error("Shared GeminiClient: genAI not initialized before getModel call.");
-        }
-        try {
-            initializedModels[modelName] = genAI.getGenerativeModel({ model: modelName });
-            console.log(`Shared GeminiClient: Model '${modelName}' initialized and cached.`);
-        } catch (modelInitError) {
-            console.error(`CRITICAL: Shared GeminiClient: Error initializing model '${modelName}':`, modelInitError);
-            throw modelInitError;
-        }
+    if (!genAI) { // Should be caught by ensureGenAIInitialized, but as a safeguard
+        throw new Error("Shared GeminiClient: genAI not initialized before getModel call.");
     }
-    return initializedModels[modelName];
+    
+    // In the new SDK, we don't need to pre-initialize models
+    // Just validate that the client is ready and return the model name
+    console.log(`Shared GeminiClient: Model '${modelName}' validated and ready for use.`);
+    return modelName; // Return model name for backwards compatibility
 }
 
 const DEFAULT_SAFETY_SETTINGS = [
@@ -125,33 +123,58 @@ async function generateContent({
         throw new Error("Shared GeminiClient: modelName, contents, and generationConfig are required for generateContent.");
     }
 
-    const modelInstance = await getModel(modelName); // getModel ensures genAI is initialized
+    await ensureGenAIInitialized(); // Ensure client is ready
     console.log(`Shared GeminiClient: Generating content with model '${modelName}'.`);
 
     try {
-        const result = await modelInstance.generateContent({
-            contents,
-            systemInstruction,
-            generationConfig,
-            safetySettings,
-        });
+        // New unified SDK API pattern
+        const requestConfig = {
+            model: modelName,
+            contents: contents,
+            config: {
+                generationConfig: generationConfig,
+                safetySettings: safetySettings
+            }
+        };
 
-        if (!result || !result.response) {
+        // Add system instruction if provided
+        if (systemInstruction) {
+            requestConfig.config.systemInstruction = systemInstruction;
+        }
+
+        const result = await genAI.models.generateContent(requestConfig);
+
+        if (!result || !result.candidates) {
             console.error(`Shared GeminiClient: Model '${modelName}' returned no response object. Full result:`, JSON.stringify(result, null, 2));
             throw new Error(`AI service (model: ${modelName}) returned no response object.`);
         }
-        if (!result.response.candidates || result.response.candidates.length === 0) {
-            const blockReason = result.response?.promptFeedback?.blockReason;
-            const responseSafetyRatings = result.response?.promptFeedback?.safetyRatings;
+        
+        if (result.candidates.length === 0) {
+            const blockReason = result.promptFeedback?.blockReason;
+            const responseSafetyRatings = result.promptFeedback?.safetyRatings;
             console.error(`Shared GeminiClient: Model '${modelName}' returned no candidates. Block Reason: ${blockReason}, Safety Ratings: ${JSON.stringify(responseSafetyRatings)}`);
             let errorMessage = `AI service (model: ${modelName}) returned no candidates.`;
             if (blockReason) errorMessage += ` Reason: ${blockReason}.`;
-            if (result.response?.promptFeedback?.blockReason === 'SAFETY' || (responseSafetyRatings && responseSafetyRatings.some(r => r.blocked))) {
+            if (result.promptFeedback?.blockReason === 'SAFETY' || (responseSafetyRatings && responseSafetyRatings.some(r => r.blocked))) {
                  errorMessage = `Request to model '${modelName}' was blocked due to safety settings.`;
             }
             throw new Error(errorMessage);
         }
-        return result.response;
+
+        // Create backwards-compatible response object
+        const response = {
+            candidates: result.candidates,
+            promptFeedback: result.promptFeedback,
+            usageMetadata: result.usageMetadata,
+            text: () => {
+                if (result.candidates && result.candidates[0] && result.candidates[0].content && result.candidates[0].content.parts) {
+                    return result.candidates[0].content.parts.map(part => part.text).join('');
+                }
+                return '';
+            }
+        };
+
+        return response;
     } catch (error) {
         console.error(`Shared GeminiClient: Error in generateContent call to model '${modelName}':`, error);
         if (error.message && error.message.toLowerCase().includes("safety")) {
